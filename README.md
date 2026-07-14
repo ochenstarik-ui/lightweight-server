@@ -11,6 +11,7 @@
 | `ochenstarik-server-user-3.sh` | Создаёт администратора, переносит SSH на порт из этапа 2, проверяет права и включает fail2ban | После установки необходимых пакетов; проще всего сначала запустить скрипт 2 |
 | `ochenstarik-server-tg-4.sh` | Отправляет уведомления в Telegram при успешном входе по SSH | После установки OpenSSH и `curl`; обычно после скрипта 2 или 3 |
 | `ochenstarik-server-vpn-5.sh` | Устанавливает Xray и направляет системный трафик через VLESS + REALITY | Да; зависимости устанавливаются автоматически |
+| `ochenstarik-server-panel-warp-6.sh` | Устанавливает 3x-ui и Cloudflare WARP, настраивает и проверяет их порты | Ubuntu 22.04/24.04/26.04 или Debian 12/13 |
 
 Файлы `*.env.example` являются только примерами. Не записывайте настоящие пароли, токены и приватные SSH-ключи в Git.
 
@@ -57,7 +58,7 @@ swapon --show
 sysctl vm.swappiness
 ```
 
-## 2. Базовые пакеты, часовой пояс и брандмауэр
+## 2. Базовые пакеты, SSH-порт и брандмауэр
 
 Файл: `ochenstarik-server-2.sh`.
 
@@ -188,6 +189,33 @@ curl -4 https://api.ipify.org
 sudo ./ochenstarik-server-vpn-5.sh --disable
 ```
 
+## 6. Панель 3x-ui и локальный proxy Cloudflare WARP
+
+Файл: `ochenstarik-server-panel-warp-6.sh`.
+
+Скрипт предлагает выбрать три разных порта:
+
+- порт веб-панели 3x-ui, по умолчанию `2053`;
+- порт подписок 3x-ui, по умолчанию `2096`;
+- локальный SOCKS5/HTTP proxy-порт WARP, по умолчанию `40000`.
+
+3x-ui устанавливается официальным интерактивным установщиком. После установки выбранные порты записываются в стандартную SQLite-базу с предварительной резервной копией. Скрипт включает сервис подписок, запускает `x-ui` и проверяет оба TCP-слушателя.
+
+Cloudflare WARP устанавливается из официального APT-репозитория, переводится в Local proxy mode через MASQUE и проверяется запросом к Cloudflare: ответ должен содержать `warp=on`.
+
+```bash
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-panel-warp-6.sh
+chmod 700 ochenstarik-server-panel-warp-6.sh
+bash -n ochenstarik-server-panel-warp-6.sh
+sudo ./ochenstarik-server-panel-warp-6.sh
+```
+
+В UFW открываются и проверяются `80/tcp`, `443/tcp`, выбранный порт панели и выбранный порт подписок. WARP слушает только локально на `127.0.0.1:40000` либо другом выбранном порту. Этот порт намеренно не публикуется через UFW, поскольку локальный proxy не требует аутентификации.
+
+Поддерживаются официально доступные пакеты WARP для Ubuntu `jammy`, `noble`, `resolute` и Debian `bookworm`, `trixie` на `amd64` и `arm64`.
+
+Официальные источники: [установка 3x-ui](https://github.com/MHSanaei/3x-ui/wiki/Installation), [пакеты Cloudflare WARP](https://pkg.cloudflareclient.com/) и [режимы WARP](https://developers.cloudflare.com/warp-client/warp-modes/).
+
 ## Полная установка
 
 Если нужны все модули, запускайте их по очереди:
@@ -198,9 +226,10 @@ sudo ./ochenstarik-server-2.sh
 sudo ./ochenstarik-server-user-3.sh
 sudo ./ochenstarik-server-tg-4.sh
 sudo ./ochenstarik-server-vpn-5.sh
+sudo ./ochenstarik-server-panel-warp-6.sh
 ```
 
-VPN и Telegram-уведомления являются необязательными этапами.
+VPN, 3x-ui, WARP и Telegram-уведомления являются необязательными этапами.
 
 ## Безопасность
 
