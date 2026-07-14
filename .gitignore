@@ -1,0 +1,19 @@
+# Local configuration and secrets
+.env
+.env.*
+!*.env.example
+env.txt
+password.hash
+telegram.conf
+
+# Keys and certificates
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

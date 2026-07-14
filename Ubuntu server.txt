@@ -1,0 +1,13 @@
+Актуальная инструкция находится в README.md:
+https://github.com/ochenstarik-ui/lightweight-server#readme
+
+Можно установить только нужный модуль. Пример для базовой настройки:
+
+sudo apt-get update
+sudo apt-get install -y curl
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-2.sh
+chmod 700 ochenstarik-server-2.sh
+bash -n ochenstarik-server-2.sh
+sudo ./ochenstarik-server-2.sh
+
+Ссылки на отдельную установку остальных модулей приведены в README.md.
