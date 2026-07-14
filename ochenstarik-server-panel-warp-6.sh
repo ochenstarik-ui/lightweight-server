@@ -11,6 +11,8 @@ readonly DEFAULT_PANEL_PORT="2053"
 readonly DEFAULT_SUBSCRIPTION_PORT="2096"
 readonly DEFAULT_WARP_PORT="40000"
 readonly SSH_PORT_CONFIG="/etc/ochenstarik-server/ssh-port.conf"
+readonly IP_FAMILY_CONFIG="/etc/ochenstarik-server/ip-family.conf"
+readonly MANAGED_PORTS_CONFIG="/etc/ochenstarik-server/ufw-managed-ports.conf"
 
 TMP_DIR=""
 
@@ -78,6 +80,26 @@ read_saved_ssh_port() {
   SAVED_SSH_PORT="$((10#$saved_port))"
 }
 
+read_ip_mode() {
+  local mode=both
+  if [[ -e "$IP_FAMILY_CONFIG" ]]; then
+    [[ -f "$IP_FAMILY_CONFIG" && ! -L "$IP_FAMILY_CONFIG" ]] \
+      || die "$IP_FAMILY_CONFIG должен быть обычным файлом"
+    mode="$(sed -n 's/^IP_MODE=//p' "$IP_FAMILY_CONFIG" | head -n1 | tr -d '\r')"
+  fi
+  case "$mode" in ipv4|ipv6|both) printf '%s' "$mode" ;; *) die "Некорректный IP_MODE: $mode" ;; esac
+}
+
+record_managed_ufw_rule() {
+  local rule="$1"
+  install -d -m 700 -o root -g root "$(dirname "$MANAGED_PORTS_CONFIG")"
+  [[ ! -L "$MANAGED_PORTS_CONFIG" ]] || die "$MANAGED_PORTS_CONFIG не должен быть символической ссылкой"
+  touch "$MANAGED_PORTS_CONFIG"
+  grep -Fqx -- "$rule" "$MANAGED_PORTS_CONFIG" || printf '%s\n' "$rule" >> "$MANAGED_PORTS_CONFIG"
+  chown root:root "$MANAGED_PORTS_CONFIG"
+  chmod 600 "$MANAGED_PORTS_CONFIG"
+}
+
 wait_for_tcp_listener() {
   local port="$1" description="$2" attempt
   for attempt in {1..20}; do
@@ -91,15 +113,30 @@ wait_for_tcp_listener() {
 }
 
 allow_ufw_port() {
-  local port="$1" description="$2"
+  local port="$1" description="$2" mode
+  mode="$(read_ip_mode)"
   log "UFW: открываю ${port}/tcp (${description})"
-  ufw allow "${port}/tcp"
+  record_managed_ufw_rule "${port}/tcp"
+  if [[ "$mode" == ipv4 || "$mode" == both ]]; then
+    ufw allow from 0.0.0.0/0 to any port "$port" proto tcp
+  fi
+  if [[ "$mode" == ipv6 || "$mode" == both ]]; then
+    ufw allow from ::/0 to any port "$port" proto tcp
+  fi
 }
 
 verify_ufw_port() {
-  local port="$1"
-  LANG=C ufw status | grep -Eq "(^|[[:space:]])${port}/tcp[[:space:]]+ALLOW" \
-    || die "В UFW не найдено разрешающее правило для ${port}/tcp"
+  local port="$1" mode status
+  mode="$(read_ip_mode)"
+  status="$(LANG=C ufw status)"
+  if [[ "$mode" == ipv4 || "$mode" == both ]]; then
+    grep -Eq "^${port}/tcp[[:space:]]+ALLOW" <<< "$status" \
+      || die "В UFW не найдено IPv4-правило для ${port}/tcp"
+  fi
+  if [[ "$mode" == ipv6 || "$mode" == both ]]; then
+    grep -Eq "^${port}/tcp \(v6\)[[:space:]]+ALLOW" <<< "$status" \
+      || die "В UFW не найдено IPv6-правило для ${port}/tcp"
+  fi
 }
 
 set_xui_setting() {

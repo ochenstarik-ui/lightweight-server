@@ -6,6 +6,8 @@ readonly HASH_FILE="${HASH_FILE:-/root/setup-data/password.hash}"
 readonly SSHD_DROPIN="/etc/ssh/sshd_config.d/00-hermes-hardening.conf"
 readonly FAIL2BAN_JAIL="/etc/fail2ban/jail.d/hermes.local"
 readonly SSH_PORT_CONFIG="/etc/ochenstarik-server/ssh-port.conf"
+readonly IP_FAMILY_CONFIG="/etc/ochenstarik-server/ip-family.conf"
+readonly MANAGED_PORTS_CONFIG="/etc/ochenstarik-server/ufw-managed-ports.conf"
 
 log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
@@ -62,6 +64,40 @@ is_valid_port() {
   local port="$1"
   [[ "$port" =~ ^[0-9]{1,5}$ ]] || return 1
   (( 10#$port >= 1 && 10#$port <= 65535 ))
+}
+
+read_ip_mode() {
+  local mode=both
+  if [[ -e "$IP_FAMILY_CONFIG" ]]; then
+    [[ -f "$IP_FAMILY_CONFIG" && ! -L "$IP_FAMILY_CONFIG" ]] \
+      || die "$IP_FAMILY_CONFIG must be a regular file"
+    mode="$(sed -n 's/^IP_MODE=//p' "$IP_FAMILY_CONFIG" | head -n1 | tr -d '\r')"
+  fi
+  case "$mode" in ipv4|ipv6|both) printf '%s' "$mode" ;; *) die "Invalid IP_MODE: $mode" ;; esac
+}
+
+record_managed_ufw_rule() {
+  local rule="$1"
+  install -d -m 700 -o root -g root "$(dirname "$MANAGED_PORTS_CONFIG")"
+  [[ ! -L "$MANAGED_PORTS_CONFIG" ]] || die "$MANAGED_PORTS_CONFIG must not be a symbolic link"
+  touch "$MANAGED_PORTS_CONFIG"
+  grep -Fqx -- "$rule" "$MANAGED_PORTS_CONFIG" || printf '%s\n' "$rule" >> "$MANAGED_PORTS_CONFIG"
+  chown root:root "$MANAGED_PORTS_CONFIG"
+  chmod 600 "$MANAGED_PORTS_CONFIG"
+}
+
+allow_ufw_rule() {
+  local rule="$1" mode port protocol
+  mode="$(read_ip_mode)"
+  port="${rule%/*}"
+  protocol="${rule#*/}"
+  record_managed_ufw_rule "$rule"
+  if [[ "$mode" == ipv4 || "$mode" == both ]]; then
+    ufw allow from 0.0.0.0/0 to any port "$port" proto "$protocol"
+  fi
+  if [[ "$mode" == ipv6 || "$mode" == both ]]; then
+    ufw allow from ::/0 to any port "$port" proto "$protocol"
+  fi
 }
 
 select_action() {
@@ -139,7 +175,7 @@ add_ufw_ports_interactive() {
 
   for rule in "${rules[@]}"; do
     log "Allowing ${rule} in UFW"
-    ufw allow "$rule"
+    allow_ufw_rule "$rule"
   done
 
   if ! LANG=C ufw status | grep -q '^Status: active'; then
@@ -438,9 +474,9 @@ effective_password="$(sshd -T | awk '$1 == "passwordauthentication" { print $2; 
 
 if [[ "$MANAGE_UFW" == yes ]]; then
   log "Allowing SSH, HTTPS, and application ports in UFW without resetting existing rules"
-  ufw allow "${SSH_PORT}/tcp"
-  ufw allow "443/tcp"
-  ufw allow "63636/tcp"
+  allow_ufw_rule "${SSH_PORT}/tcp"
+  allow_ufw_rule "443/tcp"
+  allow_ufw_rule "63636/tcp"
   ufw --force enable
 else
   warn "MANAGE_UFW=no: firewall was not enabled or modified"
@@ -483,5 +519,19 @@ printf 'Password SSH authentication: %s\n' "$PASSWORD_AUTH"
 printf 'Passwordless sudo: %s\n' "$PASSWORDLESS_SUDO"
 printf '\nOpen a NEW terminal and test before closing the current root session:\n'
 printf 'ssh -p %s %s@<server-ip>\n' "$SSH_PORT" "$NEW_USERNAME"
-printf 'After that login succeeds, remove the temporary port 22 rule: sudo ufw delete allow 22/tcp\n'
+case "$(read_ip_mode)" in
+  ipv4)
+    printf 'After that login succeeds, remove temporary port 22 with:\n'
+    printf 'sudo ufw delete allow from 0.0.0.0/0 to any port 22 proto tcp\n'
+    ;;
+  ipv6)
+    printf 'After that login succeeds, remove temporary port 22 with:\n'
+    printf 'sudo ufw delete allow from ::/0 to any port 22 proto tcp\n'
+    ;;
+  both)
+    printf 'After that login succeeds, remove both temporary port 22 rules:\n'
+    printf 'sudo ufw delete allow from 0.0.0.0/0 to any port 22 proto tcp\n'
+    printf 'sudo ufw delete allow from ::/0 to any port 22 proto tcp\n'
+    ;;
+esac
 printf 'To enable Telegram login notifications, run ochenstarik-server-tg-4.sh.\n'
