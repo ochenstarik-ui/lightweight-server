@@ -57,8 +57,102 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
+is_valid_port() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] || return 1
+  (( 10#$port >= 1 && 10#$port <= 65535 ))
+}
+
+select_action() {
+  local choice
+
+  printf '\nSelect an action:\n'
+  printf '  1 - new installation or reconfigure the administrative user and SSH\n'
+  printf '  2 - add open ports to UFW without changing SSH or users\n'
+  while :; do
+    read -rp 'Select [1]: ' choice
+    choice="${choice:-1}"
+    case "$choice" in
+      1)
+        ACTION="install"
+        return 0
+        ;;
+      2)
+        ACTION="add-ports"
+        return 0
+        ;;
+      *)
+        warn "Select 1 or 2"
+        ;;
+    esac
+  done
+}
+
+add_ufw_ports_interactive() {
+  local input normalized token port protocol rule
+  local -a tokens rules
+  local -A seen
+
+  require_command ufw
+  printf '\nEnter one or more ports separated by spaces or commas.\n'
+  printf 'TCP is used by default; specify UDP explicitly when needed.\n'
+  printf 'Example: 80 443/tcp 53/udp 40000\n'
+
+  while :; do
+    read -rp 'Ports to open: ' input
+    normalized="${input//,/ }"
+    read -r -a tokens <<< "$normalized"
+    rules=()
+    seen=()
+
+    if (( ${#tokens[@]} == 0 )); then
+      warn "Enter at least one port"
+      continue
+    fi
+
+    for token in "${tokens[@]}"; do
+      if [[ ! "$token" =~ ^([0-9]+)(/(tcp|udp))?$ ]]; then
+        warn "Invalid rule: $token; use PORT, PORT/tcp or PORT/udp"
+        rules=()
+        break
+      fi
+
+      port="${BASH_REMATCH[1]}"
+      protocol="${BASH_REMATCH[3]:-tcp}"
+      if ! is_valid_port "$port"; then
+        warn "Port must be between 1 and 65535: $port"
+        rules=()
+        break
+      fi
+      port="$((10#$port))"
+
+      rule="${port}/${protocol}"
+      if [[ -z "${seen[$rule]:-}" ]]; then
+        rules+=("$rule")
+        seen["$rule"]=1
+      fi
+    done
+
+    (( ${#rules[@]} > 0 )) && break
+  done
+
+  for rule in "${rules[@]}"; do
+    log "Allowing ${rule} in UFW"
+    ufw allow "$rule"
+  done
+
+  if ! LANG=C ufw status | grep -q '^Status: active'; then
+    warn "UFW is inactive. Rules were added but the firewall was not enabled automatically."
+    warn "Review SSH access first, then enable it with: ufw enable"
+  fi
+
+  printf '\nCurrent UFW status:\n'
+  ufw status verbose
+}
+
 collect_user_configuration() {
-  local new_username ssh_public_key pass pass2 candidate_uid
+  local new_username ssh_port default_ssh_port saved_ssh_port
+  local ssh_public_key pass pass2 candidate_uid
   local key_method source_username source_home source_key_file candidate_key key_test
 
   log "Collecting configuration for a new administrative user"
@@ -77,6 +171,24 @@ collect_user_configuration() {
       warn "User $new_username already exists; its password and SSH key will be updated"
     fi
     break
+  done
+
+  default_ssh_port="20202"
+  if [[ -f "$ENV_FILE" ]]; then
+    saved_ssh_port="$(read_env_value SSH_PORT)"
+    if is_valid_port "$saved_ssh_port"; then
+      default_ssh_port="$saved_ssh_port"
+    fi
+  fi
+
+  while :; do
+    read -rp "SSH port [${default_ssh_port}]: " ssh_port
+    ssh_port="${ssh_port:-$default_ssh_port}"
+    if is_valid_port "$ssh_port"; then
+      ssh_port="$((10#$ssh_port))"
+      break
+    fi
+    warn "SSH port must be a number between 1 and 65535"
   done
 
   while :; do
@@ -151,7 +263,7 @@ collect_user_configuration() {
   printf '%s' "$pass" | openssl passwd -6 -stdin > "$HASH_FILE"
   cat > "$ENV_FILE" <<EOF
 NEW_USERNAME=${new_username}
-SSH_PORT=20202
+SSH_PORT=${ssh_port}
 SSH_PUBLIC_KEY=${ssh_public_key}
 PASSWORD_AUTH=no
 PASSWORDLESS_SUDO=no
@@ -161,6 +273,15 @@ EOF
 }
 
 [[ "$EUID" -eq 0 ]] || die "Run this script as root"
+ACTION=""
+select_action
+
+if [[ "$ACTION" == "add-ports" ]]; then
+  add_ufw_ports_interactive
+  printf '\nDone. SSH and user settings were not changed.\n'
+  exit 0
+fi
+
 require_command openssl
 require_command ssh-keygen
 [[ ! -L "$ENV_FILE" && ! -L "$HASH_FILE" ]] || die "Configuration files must not be symbolic links"
@@ -196,8 +317,7 @@ if id "$NEW_USERNAME" >/dev/null 2>&1; then
   existing_uid="$(id -u "$NEW_USERNAME")"
   (( existing_uid >= 1000 && existing_uid != 65534 )) || die "Refusing to modify a system account: $NEW_USERNAME"
 fi
-[[ "$SSH_PORT" =~ ^[0-9]+$ ]] || die "SSH_PORT must be numeric"
-(( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || die "SSH_PORT must be between 1 and 65535"
+is_valid_port "$SSH_PORT" || die "SSH_PORT must be between 1 and 65535"
 validate_boolean PASSWORD_AUTH "$PASSWORD_AUTH"
 validate_boolean PASSWORDLESS_SUDO "$PASSWORDLESS_SUDO"
 validate_boolean MANAGE_UFW "$MANAGE_UFW"
