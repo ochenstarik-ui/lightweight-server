@@ -24,13 +24,39 @@
 
 ## Получение проекта
 
+Рекомендуемый способ — загрузка архива через `codeload.github.com`. Он подходит в том числе для серверов, на которых соединение с основным доменом `github.com` завершается ошибкой `SSL connection timeout`:
+
 ```bash
+set -e
+cd "$HOME"
 sudo apt-get update
-sudo apt-get install -y git
-git clone https://github.com/ochenstarik-ui/lightweight-server.git
+sudo apt-get install -y curl ca-certificates tar
+curl -4 -fL \
+  --retry 5 \
+  --retry-delay 10 \
+  --connect-timeout 30 \
+  https://codeload.github.com/ochenstarik-ui/lightweight-server/tar.gz/refs/heads/main \
+  -o lightweight-server.tar.gz
+mkdir lightweight-server
+tar -xzf lightweight-server.tar.gz -C lightweight-server --strip-components=1
+rm lightweight-server.tar.gz
 cd lightweight-server
 chmod 700 ./*.sh
 ```
+
+Если `github.com` доступен с сервера, проект также можно получить через Git:
+
+```bash
+set -e
+cd "$HOME"
+sudo apt-get update
+sudo apt-get install -y git ca-certificates
+git -c http.version=HTTP/1.1 clone --depth 1 https://github.com/ochenstarik-ui/lightweight-server.git
+cd lightweight-server
+chmod 700 ./*.sh
+```
+
+Команда `set -e` останавливает последовательность при ошибке загрузки, поэтому команды `cd` и `chmod` не будут выполняться для отсутствующей папки.
 
 Перед запуском любого выбранного файла можно проверить его синтаксис:
 
