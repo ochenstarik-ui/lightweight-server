@@ -68,7 +68,7 @@ bash -n ./ИМЯ-СКРИПТА.sh
 
 Файл: `ochenstarik-server-1.sh`.
 
-Сначала предлагает ввести часовой пояс в формате IANA, например `Asia/Novosibirsk`, `Europe/Moscow` или `UTC`, и проверяет его через `timedatectl`. Затем создаёт `/swapfile` размером 2 ГБ, добавляет его в `/etc/fstab` и устанавливает `vm.swappiness=20`. Повторный запуск предусмотрен.
+Сначала показывает нумерованное меню популярных часовых поясов, включая `Asia/Novosibirsk`, `Europe/Moscow` и `UTC`. Нужную зону достаточно выбрать по номеру. Для остальных зон предусмотрен полный список с последовательным выбором региона и часового пояса — вводить имя вручную не требуется. Затем скрипт создаёт `/swapfile` размером 2 ГБ, добавляет его в `/etc/fstab` и устанавливает `vm.swappiness=20`. Повторный запуск предусмотрен.
 
 ```bash
 curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-1.sh

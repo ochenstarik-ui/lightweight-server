@@ -10,22 +10,74 @@ log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
 die() { printf '[x] %s\n' "$*" >&2; exit 1; }
 
+choose_numbered_option() {
+  local prompt="$1" result_variable="$2" answer index
+  shift 2
+  local -a options=("$@")
+
+  ((${#options[@]} > 0)) || die "No options are available for: ${prompt}"
+  while :; do
+    printf '\n%s\n' "$prompt"
+    for index in "${!options[@]}"; do
+      printf '  %d) %s\n' "$((index + 1))" "${options[index]}"
+    done
+    read -rp "Enter the option number: " answer || die "Input was interrupted"
+    if [[ "$answer" =~ ^[0-9]+$ ]] && ((answer >= 1 && answer <= ${#options[@]})); then
+      printf -v "$result_variable" '%s' "${options[answer - 1]}"
+      return 0
+    fi
+    warn "Enter a number from 1 to ${#options[@]}"
+  done
+}
+
+choose_timezone_from_full_list() {
+  local result_variable="$1" region selected_timezone
+  local -a regions region_timezones
+
+  mapfile -t regions < <(timedatectl list-timezones | awk -F/ 'NF > 1 && !seen[$1]++ { print $1 }')
+  choose_numbered_option "Select a region:" region "${regions[@]}"
+  mapfile -t region_timezones < <(timedatectl list-timezones | awk -F/ -v selected_region="$region" '$1 == selected_region')
+  choose_numbered_option "Select a timezone in ${region}:" selected_timezone "${region_timezones[@]}"
+  printf -v "$result_variable" '%s' "$selected_timezone"
+}
+
 choose_timezone() {
-  local current_timezone timezone
+  local current_timezone timezone candidate
+  local full_list_option="Other timezone (select by region)"
+  local -a timezone_options=()
 
   current_timezone="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
   current_timezone="${current_timezone:-Asia/Novosibirsk}"
-  printf 'Select an IANA timezone, for example Asia/Novosibirsk, Europe/Moscow or UTC.\n'
-  while :; do
-    read -rp "Timezone [${current_timezone}]: " timezone
-    timezone="${timezone:-$current_timezone}"
-    if timedatectl list-timezones | grep -Fqx -- "$timezone"; then
-      timedatectl set-timezone "$timezone"
-      log "Timezone set to ${timezone}"
-      return 0
+
+  for candidate in \
+    "$current_timezone" \
+    UTC \
+    Europe/Moscow \
+    Europe/Kaliningrad \
+    Asia/Yekaterinburg \
+    Asia/Omsk \
+    Asia/Novosibirsk \
+    Asia/Krasnoyarsk \
+    Asia/Irkutsk \
+    Asia/Yakutsk \
+    Asia/Vladivostok \
+    Asia/Magadan \
+    Asia/Kamchatka; do
+    if timedatectl list-timezones | grep -Fqx -- "$candidate" &&
+       [[ ! " ${timezone_options[*]} " =~ " ${candidate} " ]]; then
+      timezone_options+=("$candidate")
     fi
-    warn "Unknown timezone: $timezone"
   done
+  timezone_options+=("$full_list_option")
+
+  choose_numbered_option "Select the server timezone (current: ${current_timezone}):" timezone "${timezone_options[@]}"
+  if [[ "$timezone" == "$full_list_option" ]]; then
+    choose_timezone_from_full_list timezone
+  fi
+
+  timedatectl list-timezones | grep -Fqx -- "$timezone" || die "Unknown timezone: $timezone"
+  timedatectl set-timezone "$timezone"
+  log "Timezone set to ${timezone}"
 }
 
 [[ "$EUID" -eq 0 ]] || die "Run this script as root"
