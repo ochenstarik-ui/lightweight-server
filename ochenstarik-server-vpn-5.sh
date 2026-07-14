@@ -81,7 +81,9 @@ printf '\n'
 TMP_DIR="$(mktemp -d)"
 chmod 700 "$TMP_DIR"
 RAW_FILE="${TMP_DIR}/subscription.txt"
+LINKS_FILE="${TMP_DIR}/vless-links.txt"
 LINK_FILE="${TMP_DIR}/vless-link.txt"
+PORTS_FILE="${TMP_DIR}/vless-ports.txt"
 GENERATED_CONFIG="${TMP_DIR}/config.json"
 INSTALLER_FILE="${TMP_DIR}/install-release.sh"
 
@@ -98,36 +100,93 @@ fi
 unset SUBSCRIPTION_INPUT
 chmod 600 "$RAW_FILE"
 
-python3 - "$RAW_FILE" "$LINK_FILE" <<'PY'
+python3 - "$RAW_FILE" "$LINKS_FILE" "$PORTS_FILE" <<'PY'
 import base64
 import pathlib
 import sys
+import urllib.parse
 
 raw = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").strip()
 
 def find_vless(text: str):
+    result = []
     for line in text.replace("\r", "").split("\n"):
         line = line.strip()
         if line.startswith("vless://"):
-            return line
-    return None
+            result.append(line)
+    return result
 
-link = find_vless(raw)
-if not link:
+links = find_vless(raw)
+if not links:
     try:
         padded = raw.replace("-", "+").replace("_", "/")
         padded += "=" * (-len(padded) % 4)
         decoded = base64.b64decode(padded, validate=False).decode("utf-8")
     except Exception as exc:
         raise SystemExit(f"Подписка не является Base64/VLESS: {exc}")
-    link = find_vless(decoded)
+    links = find_vless(decoded)
 
-if not link:
+links = list(dict.fromkeys(links))
+if not links:
     raise SystemExit("В подписке не найдена ссылка vless://")
 
-pathlib.Path(sys.argv[2]).write_text(link, encoding="utf-8")
+ports = []
+for link in links:
+    try:
+        port = urllib.parse.urlsplit(link).port
+    except ValueError as exc:
+        raise SystemExit(f"Некорректный порт в VLESS-ссылке: {exc}")
+    if port is None:
+        raise SystemExit("В одной из VLESS-ссылок отсутствует порт")
+    if port not in ports:
+        ports.append(port)
+
+pathlib.Path(sys.argv[2]).write_text("\n".join(links) + "\n", encoding="utf-8")
+pathlib.Path(sys.argv[3]).write_text(
+    "\n".join(str(port) for port in ports) + "\n", encoding="utf-8"
+)
+PY
+chmod 600 "$LINKS_FILE" "$PORTS_FILE"
+
+mapfile -t SUBSCRIPTION_PORTS < "$PORTS_FILE"
+(( ${#SUBSCRIPTION_PORTS[@]} > 0 )) || die "В подписке не найдены доступные порты"
+printf 'Доступные порты в подписке: %s\n' "${SUBSCRIPTION_PORTS[*]}"
+
+while :; do
+  read -rp "Выберите порт подписки [${SUBSCRIPTION_PORTS[0]}]: " SUBSCRIPTION_PORT
+  SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-${SUBSCRIPTION_PORTS[0]}}"
+  [[ "$SUBSCRIPTION_PORT" =~ ^[0-9]{1,5}$ ]] \
+    && (( 10#$SUBSCRIPTION_PORT >= 1 && 10#$SUBSCRIPTION_PORT <= 65535 )) \
+    || { warn "Порт должен быть числом от 1 до 65535"; continue; }
+  SUBSCRIPTION_PORT="$((10#$SUBSCRIPTION_PORT))"
+
+  port_found="no"
+  for available_port in "${SUBSCRIPTION_PORTS[@]}"; do
+    if [[ "$SUBSCRIPTION_PORT" == "$available_port" ]]; then
+      port_found="yes"
+      break
+    fi
+  done
+  [[ "$port_found" == yes ]] && break
+  warn "Порт ${SUBSCRIPTION_PORT} отсутствует в подписке"
+done
+
+python3 - "$LINKS_FILE" "$LINK_FILE" "$SUBSCRIPTION_PORT" <<'PY'
+import pathlib
+import sys
+import urllib.parse
+
+links = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+selected_port = int(sys.argv[3])
+for link in links:
+    if urllib.parse.urlsplit(link).port == selected_port:
+        pathlib.Path(sys.argv[2]).write_text(link, encoding="utf-8")
+        break
+else:
+    raise SystemExit(f"VLESS-ссылка для порта {selected_port} не найдена")
 PY
 chmod 600 "$LINK_FILE"
+log "Выбран порт подписки ${SUBSCRIPTION_PORT}"
 
 VPN_IP="$(python3 - "$LINK_FILE" "$GENERATED_CONFIG" "$TPROXY_PORT" "$SOCKS_PORT" <<'PY'
 import json

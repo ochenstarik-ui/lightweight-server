@@ -5,6 +5,7 @@ readonly ENV_FILE="${ENV_FILE:-/root/setup-data/env.txt}"
 readonly HASH_FILE="${HASH_FILE:-/root/setup-data/password.hash}"
 readonly SSHD_DROPIN="/etc/ssh/sshd_config.d/00-hermes-hardening.conf"
 readonly FAIL2BAN_JAIL="/etc/fail2ban/jail.d/hermes.local"
+readonly SSH_PORT_CONFIG="/etc/ochenstarik-server/ssh-port.conf"
 
 log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
@@ -151,7 +152,7 @@ add_ufw_ports_interactive() {
 }
 
 collect_user_configuration() {
-  local new_username ssh_port default_ssh_port saved_ssh_port
+  local new_username ssh_port default_ssh_port saved_ssh_port selected_step2_port
   local ssh_public_key pass pass2 candidate_uid
   local key_method source_username source_home source_key_file candidate_key key_test
 
@@ -174,22 +175,33 @@ collect_user_configuration() {
   done
 
   default_ssh_port="20202"
-  if [[ -f "$ENV_FILE" ]]; then
+  if [[ -e "$SSH_PORT_CONFIG" ]]; then
+    [[ -f "$SSH_PORT_CONFIG" && ! -L "$SSH_PORT_CONFIG" ]] \
+      || die "$SSH_PORT_CONFIG must be a regular non-symlink file"
+    selected_step2_port="$(sed -n 's/^SSH_PORT=//p' "$SSH_PORT_CONFIG" | head -n1 | tr -d '\r')"
+    is_valid_port "$selected_step2_port" \
+      || die "Invalid SSH port in $SSH_PORT_CONFIG"
+    ssh_port="$((10#$selected_step2_port))"
+    log "Using SSH port ${ssh_port} selected in step 2"
+  elif [[ -f "$ENV_FILE" ]]; then
     saved_ssh_port="$(read_env_value SSH_PORT)"
     if is_valid_port "$saved_ssh_port"; then
       default_ssh_port="$saved_ssh_port"
     fi
   fi
 
-  while :; do
-    read -rp "SSH port [${default_ssh_port}]: " ssh_port
-    ssh_port="${ssh_port:-$default_ssh_port}"
-    if is_valid_port "$ssh_port"; then
-      ssh_port="$((10#$ssh_port))"
-      break
-    fi
-    warn "SSH port must be a number between 1 and 65535"
-  done
+  if [[ -z "${ssh_port:-}" ]]; then
+    warn "The SSH port from step 2 was not found; select it now"
+    while :; do
+      read -rp "SSH port [${default_ssh_port}]: " ssh_port
+      ssh_port="${ssh_port:-$default_ssh_port}"
+      if is_valid_port "$ssh_port"; then
+        ssh_port="$((10#$ssh_port))"
+        break
+      fi
+      warn "SSH port must be a number between 1 and 65535"
+    done
+  fi
 
   while :; do
     printf '\nSSH key setup:\n'
@@ -329,7 +341,7 @@ fi
 
 log "Checking packages installed by step 2"
 
-for command_name in sshd ssh-keygen visudo systemctl; do
+for command_name in find sshd ssh-keygen visudo systemctl; do
   require_command "$command_name"
 done
 
@@ -370,13 +382,28 @@ user_group="$(id -gn "$NEW_USERNAME")"
 # every run so an existing user can be fixed by running this script again.
 chown "$NEW_USERNAME:$user_group" "$user_home"
 chmod 750 "$user_home"
+[[ ! -L "$user_home/.ssh" ]] || die "Refusing to use a symbolic link as $user_home/.ssh"
 install -d -m 700 -o "$NEW_USERNAME" -g "$user_group" "$user_home/.ssh"
+[[ ! -L "$user_home/.ssh/authorized_keys" ]] \
+  || die "Refusing to use a symbolic link as $user_home/.ssh/authorized_keys"
 touch -- "$user_home/.ssh/authorized_keys"
-chown "$NEW_USERNAME:$user_group" "$user_home/.ssh/authorized_keys"
-chmod 600 "$user_home/.ssh/authorized_keys"
 if ! grep -Fqx -- "$SSH_PUBLIC_KEY" "$user_home/.ssh/authorized_keys"; then
   printf '%s\n' "$SSH_PUBLIC_KEY" >> "$user_home/.ssh/authorized_keys"
 fi
+chown -R --no-dereference "$NEW_USERNAME:$user_group" "$user_home/.ssh"
+find "$user_home/.ssh" -xdev -type d -exec chmod 700 {} +
+find "$user_home/.ssh" -xdev -type f -exec chmod 600 {} +
+
+id -nG "$NEW_USERNAME" | tr ' ' '\n' | grep -Fqx sudo \
+  || die "$NEW_USERNAME was not added to the sudo group"
+[[ "$(stat -c '%U:%G' "$user_home/.ssh")" == "$NEW_USERNAME:$user_group" ]] \
+  || die "Incorrect owner for $user_home/.ssh"
+[[ "$(stat -c '%a' "$user_home/.ssh")" == 700 ]] \
+  || die "Incorrect permissions for $user_home/.ssh"
+[[ "$(stat -c '%U:%G' "$user_home/.ssh/authorized_keys")" == "$NEW_USERNAME:$user_group" ]] \
+  || die "Incorrect owner for authorized_keys"
+[[ "$(stat -c '%a' "$user_home/.ssh/authorized_keys")" == 600 ]] \
+  || die "Incorrect permissions for authorized_keys"
 
 if command -v restorecon >/dev/null 2>&1; then
   restorecon -RF "$user_home/.ssh" || warn "SELinux context could not be restored"

@@ -7,12 +7,33 @@ readonly SWAPPINESS="20"
 readonly SYSCTL_FILE="/etc/sysctl.d/60-hermes-swap.conf"
 
 log() { printf '[+] %s\n' "$*"; }
+warn() { printf '[!] %s\n' "$*" >&2; }
 die() { printf '[x] %s\n' "$*" >&2; exit 1; }
 
+choose_timezone() {
+  local current_timezone timezone
+
+  current_timezone="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
+  current_timezone="${current_timezone:-Asia/Novosibirsk}"
+  printf 'Select an IANA timezone, for example Asia/Novosibirsk, Europe/Moscow or UTC.\n'
+  while :; do
+    read -rp "Timezone [${current_timezone}]: " timezone
+    timezone="${timezone:-$current_timezone}"
+    if timedatectl list-timezones | grep -Fqx -- "$timezone"; then
+      timedatectl set-timezone "$timezone"
+      log "Timezone set to ${timezone}"
+      return 0
+    fi
+    warn "Unknown timezone: $timezone"
+  done
+}
+
 [[ "$EUID" -eq 0 ]] || die "Run this script as root"
-for command_name in awk blkid fallocate mkswap swapon sysctl; do
+for command_name in awk blkid fallocate grep mkswap swapon sysctl timedatectl; do
   command -v "$command_name" >/dev/null 2>&1 || die "Required command not found: $command_name"
 done
+
+choose_timezone
 
 log "Configuring ${SWAPSIZE} swap file"
 if [[ ! -e "$SWAPFILE" ]]; then
@@ -44,5 +65,6 @@ chmod 644 "$SYSCTL_FILE"
 sysctl -p "$SYSCTL_FILE" >/dev/null
 
 log "Server memory setup is complete"
+printf 'Timezone: %s\n' "$(timedatectl show --property=Timezone --value)"
 swapon --show
 printf '\nNow run ochenstarik-server-2.sh as root.\n'
