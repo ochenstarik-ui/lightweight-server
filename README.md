@@ -2,6 +2,50 @@
 
 Набор независимых Bash-скриптов для первоначальной настройки Ubuntu Server. Можно запустить только нужные модули или выполнить их по порядку для полной настройки.
 
+## Быстрая установка
+
+Скопируйте весь блок в терминал сервера. Он загружает архив через `codeload.github.com`, проверяет ошибки на каждом шаге и запускает единый пошаговый мастер:
+
+```bash
+set -e
+cd "$HOME"
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates tar
+archive="$(mktemp)"
+trap 'rm -f "$archive"' EXIT
+curl -4 -fL \
+  --retry 5 \
+  --retry-delay 10 \
+  --connect-timeout 30 \
+  https://codeload.github.com/ochenstarik-ui/lightweight-server/tar.gz/refs/heads/main \
+  -o "$archive"
+install -d -m 700 lightweight-server
+tar -xzf "$archive" -C lightweight-server --strip-components=1
+rm -f "$archive"
+trap - EXIT
+cd lightweight-server
+chmod 700 ./*.sh
+sudo ./ochenstarik-server-install.sh
+```
+
+Мастер показывает этапы 1–7 по порядку. На каждом этапе можно выбрать установку, пропуск или завершение. В первом этапе пустой ввод устанавливает все рекомендуемые наборы программ. Во время изменения SSH-порта не закрывайте текущую сессию — сначала проверьте новый вход во втором терминале.
+
+Если нужен только мастер без скачивания полного архива:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates
+curl -4 -fLO \
+  --retry 5 \
+  --retry-delay 10 \
+  --connect-timeout 30 \
+  https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-install.sh
+chmod 700 ochenstarik-server-install.sh
+sudo ./ochenstarik-server-install.sh
+```
+
+При запуске одного мастера недостающие этапы будут загружены автоматически из основной ветки и проверены командой `bash -n`.
+
 ## Что входит в проект
 
 | Файл | Назначение | Можно запускать отдельно |
