@@ -26,5 +26,8 @@ jobs:
       - name: Test step 1 selections
         run: bash tests/test-step1-selection.sh
 
+      - name: Test master language selection
+        run: bash tests/test-master-language.sh
+
       - name: Test step 3 SSH configuration parsing
         run: bash tests/test-step3-sshd-parsing.sh

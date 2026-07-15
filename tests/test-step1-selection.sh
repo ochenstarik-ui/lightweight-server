@@ -32,14 +32,6 @@ contains_package() {
   return 1
 }
 
-declare -a EXPECTED_UI_LANGUAGES=(en ru es de fr pt zh ja ar hi)
-for index in "${!EXPECTED_UI_LANGUAGES[@]}"; do
-  choose_ui_language <<< "$((index + 1))" >/dev/null
-  [[ "$UI_LANG" == "${EXPECTED_UI_LANGUAGES[index]}" ]]
-done
-choose_ui_language <<< '' >/dev/null
-[[ "$UI_LANG" == en ]]
-
 choose_and_install_programs <<< '1 3' >/dev/null
 contains_package git
 contains_package iotop
