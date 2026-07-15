@@ -29,5 +29,8 @@ jobs:
       - name: Test master language selection
         run: bash tests/test-master-language.sh
 
+      - name: Test README languages and monitoring links
+        run: bash tests/test-readme-languages.sh
+
       - name: Test step 3 SSH configuration parsing
         run: bash tests/test-step3-sshd-parsing.sh
