@@ -5,10 +5,89 @@ readonly SWAPFILE="/swapfile"
 readonly SWAPSIZE="2G"
 readonly SWAPPINESS="20"
 readonly SYSCTL_FILE="/etc/sysctl.d/60-hermes-swap.conf"
+readonly CONFIG_DIR="/etc/ochenstarik-server"
+readonly LOCALE_BACKUP="${CONFIG_DIR}/locale-before-russian.conf"
+readonly LOCALE_ABSENT_MARKER="${CONFIG_DIR}/locale-before-russian.absent"
+readonly LOCALE_PACKAGES="${CONFIG_DIR}/russian-locale-installed-packages.list"
 
 log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
 die() { printf '[x] %s\n' "$*" >&2; exit 1; }
+
+ask_yes_no() {
+  local prompt="$1" default_answer="${2:-no}" answer suffix
+  [[ "$default_answer" == yes || "$default_answer" == no ]] \
+    || die "Invalid default answer: $default_answer"
+  [[ "$default_answer" == yes ]] && suffix='[Y/n]' || suffix='[y/N]'
+
+  while :; do
+    read -rp "$prompt $suffix " answer || die "Input was interrupted"
+    answer="${answer:-$default_answer}"
+    case "${answer,,}" in
+      y|yes|д|да) return 0 ;;
+      n|no|н|нет) return 1 ;;
+      *) warn "Ответьте yes/no или да/нет" ;;
+    esac
+  done
+}
+
+package_is_installed() {
+  dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -Fqx 'install ok installed'
+}
+
+install_russian_terminal_locale() {
+  local package_name
+  local -a packages=(locales) newly_installed=()
+
+  ask_yes_no "Установить русскую локаль терминала ru_RU.UTF-8?" no || {
+    log "Русификация терминала пропущена"
+    return 0
+  }
+
+  for package_name in apt-get apt-cache dpkg-query; do
+    command -v "$package_name" >/dev/null 2>&1 \
+      || die "Required command not found: $package_name"
+  done
+
+  log "Обновление списка пакетов для русификации"
+  apt-get update
+
+  install -d -m 700 -o root -g root "$CONFIG_DIR"
+  if [[ ! -e "$LOCALE_BACKUP" && ! -e "$LOCALE_ABSENT_MARKER" ]]; then
+    if [[ -f /etc/default/locale && ! -L /etc/default/locale ]]; then
+      cp -a -- /etc/default/locale "$LOCALE_BACKUP"
+      chmod 600 "$LOCALE_BACKUP"
+    else
+      : > "$LOCALE_ABSENT_MARKER"
+      chmod 600 "$LOCALE_ABSENT_MARKER"
+    fi
+  fi
+
+  for package_name in language-pack-ru manpages-ru; do
+    if apt-cache show "$package_name" >/dev/null 2>&1; then
+      packages+=("$package_name")
+    fi
+  done
+  for package_name in "${packages[@]}"; do
+    package_is_installed "$package_name" || newly_installed+=("$package_name")
+  done
+
+  log "Установка пакетов русской локали"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y "${packages[@]}"
+  locale-gen ru_RU.UTF-8
+  update-locale LANG=ru_RU.UTF-8 LANGUAGE=ru_RU:ru LC_MESSAGES=ru_RU.UTF-8
+
+  touch "$LOCALE_PACKAGES"
+  for package_name in "${newly_installed[@]}"; do
+    grep -Fqx -- "$package_name" "$LOCALE_PACKAGES" \
+      || printf '%s\n' "$package_name" >> "$LOCALE_PACKAGES"
+  done
+  chown root:root "$LOCALE_PACKAGES"
+  chmod 600 "$LOCALE_PACKAGES"
+
+  log "Русская локаль включена. Она применится при следующем входе в терминал"
+}
 
 choose_numbered_option() {
   local prompt="$1" result_variable="$2" answer index
@@ -86,6 +165,7 @@ for command_name in awk blkid fallocate grep mkswap swapon sysctl timedatectl; d
 done
 
 choose_timezone
+install_russian_terminal_locale
 
 log "Configuring ${SWAPSIZE} swap file"
 if [[ ! -e "$SWAPFILE" ]]; then
