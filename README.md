@@ -13,6 +13,7 @@
 | `ochenstarik-server-vpn-5.sh` | Устанавливает Xray и направляет системный трафик через VLESS + REALITY | Да; зависимости устанавливаются автоматически |
 | `ochenstarik-server-panel-warp-6.sh` | Устанавливает 3x-ui и Cloudflare WARP, настраивает и проверяет их порты | Ubuntu 22.04/24.04/26.04 или Debian 12/13 |
 | `ochenstarik-server-backup-7.sh` | Создаёт неизменяемый первичный снимок и настраивает выбранные расписания резервного копирования | Да; зависимости устанавливаются автоматически |
+| `ochenstarik-server-monitor-manager.sh` | Устанавливает главный WireGuard Hub или подключаемый узел Server Monitor Manager | Да; Hub нужен белый IP, вторичному узлу — только исходящий доступ |
 
 Файлы `*.env.example` являются только примерами. Не записывайте настоящие пароли, токены и приватные SSH-ключи в Git.
 
@@ -64,6 +65,53 @@ chmod 700 ./*.sh
 ```bash
 bash -n ./ИМЯ-СКРИПТА.sh
 ```
+
+## Server Monitor Manager: своя сеть без Tailscale
+
+Файл `ochenstarik-server-monitor-manager.sh` устанавливает лёгкую сеть WireGuard со звездной топологией. Главный сервер с белым IP становится Hub, а домашний и другие серверы подключаются к нему исходящими соединениями. Белый IP на вторичных узлах не нужен.
+
+На главном сервере откройте входящий UDP-порт WireGuard (по умолчанию `51820`) в панели хостинга и запустите:
+
+```bash
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/agent/server-monitor-installer/ochenstarik-server-monitor-manager.sh
+chmod 700 ochenstarik-server-monitor-manager.sh
+bash -n ochenstarik-server-monitor-manager.sh
+sudo ./ochenstarik-server-monitor-manager.sh hub
+```
+
+После установки создайте отдельный секретный код конфигурации для каждого узла:
+
+```bash
+sudo ochenstarik-smm node-code hermes
+sudo ochenstarik-smm node-code home
+sudo ochenstarik-smm node-code server2
+```
+
+На соответствующем вторичном сервере скачайте тот же файл и выполните:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh node
+```
+
+Установщик попросит публичный SSH-ключ приложения и код, созданный для этого узла. Код содержит приватный ключ WireGuard узла: передавайте его только в защищённый терминал, используйте для одного сервера и создайте новый узел, если код стал известен посторонним.
+
+Связи направленные и управляются на Hub. Например, разрешить Hermes доступ к домашнему серверу и ко второму серверу, а затем отключить только второй маршрут:
+
+```bash
+sudo ochenstarik-smm link-connect hermes home
+sudo ochenstarik-smm link-connect hermes server2
+sudo ochenstarik-smm link-disconnect hermes server2
+```
+
+Проверка состояния:
+
+```bash
+sudo ochenstarik-smm nodes
+sudo ochenstarik-smm links
+sudo ochenstarik-smm status
+```
+
+Hub маршрутизирует только явно разрешённые пары `источник → цель`; обратное направление включается отдельно. Вторичные серверы не соединяются друг с другом напрямую и не требуют Tailscale или другого внешнего сервиса.
 
 ## 1. Часовой пояс и настройка swap
 
