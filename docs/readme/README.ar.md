@@ -25,7 +25,7 @@ sudo ./ochenstarik-server-install.sh
 2. الحزم الأساسية ومنفذ SSH وIPv4/IPv6 وUFW.
 3. المستخدم الإداري ومفتاح SSH والصلاحيات وsudo وfail2ban.
 4. إشعارات Telegram عند تسجيل الدخول عبر SSH.
-5. VPN للنظام باستخدام Xray.
+5. VPN للنظام باستخدام Xray مع إمكانية الاتصال أو الفصل عند إعادة التشغيل.
 6. لوحة 3x-ui ووكيل Cloudflare WARP المحلي.
 7. النسخة الأولية والنسخ اليومية أو الأسبوعية أو الشهرية.
 8. وكلاء ذكاء اصطناعي اختياريون: Hermes أو OpenClaw أو OpenHands أو OpenCode أو Aider أو AutoGPT أو Pi Coding Agent.

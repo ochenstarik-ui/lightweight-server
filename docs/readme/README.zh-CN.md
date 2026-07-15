@@ -25,7 +25,7 @@ sudo ./ochenstarik-server-install.sh
 2. 基础软件包、SSH 端口、IPv4/IPv6 和 UFW。
 3. 管理员、SSH 密钥、权限、sudo 和 fail2ban。
 4. SSH 登录的 Telegram 通知。
-5. 通过 Xray 配置系统 VPN。
+5. 通过 Xray 配置系统 VPN，重复运行时可连接或断开。
 6. 3x-ui 面板和本地 Cloudflare WARP 代理。
 7. 初始快照以及每日、每周或每月备份。
 8. 可选 AI 代理：Hermes、OpenClaw、OpenHands、OpenCode、Aider、AutoGPT 或 Pi Coding Agent。

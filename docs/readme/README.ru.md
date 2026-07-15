@@ -279,6 +279,8 @@ sudo tail -f /var/log/ochenstarik-ssh-login-telegram.log
 
 Скрипт устанавливает Xray и необходимые пакеты, принимает прямую ссылку `vless://` либо HTTPS-ссылку подписки 3x-ui и настраивает маршрутизацию через `nftables`. Если подписка содержит VLESS-ссылки на нескольких портах, скрипт выводит доступные порты и просит выбрать нужный. Поддерживается VLESS с транспортом TCP/RAW и REALITY.
 
+При повторном запуске появляется меню: подключить VPN с сохранёнными настройками, отключить его без удаления конфигурации, заменить подписку либо показать состояние.
+
 ```bash
 curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-vpn-5.sh
 chmod 700 ochenstarik-server-vpn-5.sh
@@ -295,11 +297,16 @@ sudo /usr/local/sbin/ochenstarik-xray-routing status
 curl -4 https://api.ipify.org
 ```
 
-Отключение системного VPN:
+Прямые команды управления:
 
 ```bash
+sudo ./ochenstarik-server-vpn-5.sh --enable
 sudo ./ochenstarik-server-vpn-5.sh --disable
+sudo ./ochenstarik-server-vpn-5.sh --reconfigure
+sudo ./ochenstarik-server-vpn-5.sh --status
 ```
+
+Отключение удаляет правила системной маршрутизации, но сохраняет Xray и настройки для быстрого повторного подключения.
 
 ## 6. Панель 3x-ui и локальный proxy Cloudflare WARP
 

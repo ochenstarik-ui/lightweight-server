@@ -25,7 +25,7 @@ La primera pregunta selecciona el idioma del instalador; English es el valor pre
 2. Paquetes básicos, puerto SSH, IPv4/IPv6 y UFW.
 3. Usuario administrador, clave SSH, permisos, sudo y fail2ban.
 4. Notificaciones de Telegram para accesos SSH.
-5. VPN del sistema mediante Xray.
+5. VPN del sistema mediante Xray, con conexión y desconexión en ejecuciones posteriores.
 6. Panel 3x-ui y proxy local Cloudflare WARP.
 7. Instantánea inicial y copias diarias, semanales o mensuales.
 8. Agentes de IA opcionales: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT o Pi Coding Agent.
