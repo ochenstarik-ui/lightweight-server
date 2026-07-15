@@ -51,7 +51,11 @@ readonly -a PROGRAM_GROUP_PACKAGES=(
 )
 
 APT_UPDATED=no
-UI_LANG=en
+UI_LANG="${OCHENSTARIK_UI_LANG:-en}"
+case "$UI_LANG" in
+  en|ru|es|de|fr|pt|zh|ja|ar|hi) ;;
+  *) UI_LANG=en ;;
+esac
 
 declare -A UI_TEXT=()
 
@@ -335,31 +339,10 @@ localize_program_catalog() {
   esac
 }
 
-choose_ui_language() {
-  local answer
-  printf '\nSelect the installer language / Выберите язык установщика:\n'
-  printf '%s\n' \
-    '  1) English' '  2) Русский' '  3) Español' '  4) Deutsch' \
-    '  5) Français' '  6) Português' '  7) 中文' '  8) 日本語' \
-    '  9) العربية' '  10) हिन्दी'
-  while :; do
-    read -rp 'Language [1 — English]: ' answer || { printf '[x] Input was interrupted\n' >&2; exit 1; }
-    answer="${answer:-1}"
-    case "$answer" in
-      1) UI_LANG=en ;; 2) UI_LANG=ru ;; 3) UI_LANG=es ;; 4) UI_LANG=de ;;
-      5) UI_LANG=fr ;; 6) UI_LANG=pt ;; 7) UI_LANG=zh ;; 8) UI_LANG=ja ;;
-      9) UI_LANG=ar ;; 10) UI_LANG=hi ;;
-      *) printf '[!] Enter a number from 1 to 10.\n' >&2; continue ;;
-    esac
-    break
-  done
-  load_ui_text
-  localize_program_catalog
-}
-
-# English is active until the user answers the first prompt. This also keeps
-# sourced helper functions usable by the automated tests.
+# The unified installer passes the selected dialog language through the
+# environment. A directly launched step uses English by default.
 load_ui_text
+localize_program_catalog
 
 log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
@@ -657,7 +640,6 @@ choose_timezone() {
 }
 
 [[ "$EUID" -eq 0 ]] || die "Run this script as root"
-choose_ui_language
 for command_name in awk blkid fallocate grep mkswap swapon sysctl timedatectl; do
   command -v "$command_name" >/dev/null 2>&1 || die "$(msg required_missing "$command_name")"
 done
