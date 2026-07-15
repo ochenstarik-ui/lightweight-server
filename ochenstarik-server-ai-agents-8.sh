@@ -153,8 +153,10 @@ install_agent() {
     || die "The downloaded ${name} installer is empty or unsafe"
   bash -n "$TEMP_INSTALLER" || die "The official ${name} installer failed Bash syntax validation"
 
-  chown "$TARGET_USER:$TARGET_GROUP" "$TEMP_INSTALLER"
-  chmod 500 "$TEMP_INSTALLER"
+  # Keep the validated file root-owned until execution so the target account
+  # cannot replace it between validation and launch.
+  chown root:root "$TEMP_INSTALLER"
+  chmod 555 "$TEMP_INSTALLER"
   log "Installing ${name} for ${TARGET_USER}"
   runuser -u "$TARGET_USER" -- env \
     HOME="$TARGET_HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" SHELL=/bin/bash PATH="$path_value" \
