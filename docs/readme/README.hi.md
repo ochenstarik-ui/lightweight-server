@@ -28,6 +28,6 @@ sudo ./ochenstarik-server-install.sh
 5. Xray के माध्यम से सिस्टम VPN।
 6. 3x-ui पैनल और स्थानीय Cloudflare WARP प्रॉक्सी।
 7. प्रारंभिक स्नैपशॉट और दैनिक, साप्ताहिक या मासिक बैकअप।
-8. वैकल्पिक AI एजेंट: Hermes, OpenClaw, OpenHands, OpenCode या Aider।
+8. वैकल्पिक AI एजेंट: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT या Pi Coding Agent।
 
 SSH पोर्ट बदलते समय मौजूदा सत्र बंद न करें। पहले दूसरे टर्मिनल में नया लॉगिन जाँचें। अधिक जानकारी के लिए [मुख्य अंग्रेज़ी दस्तावेज़](../../README.md) देखें।

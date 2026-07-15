@@ -28,6 +28,6 @@ sudo ./ochenstarik-server-install.sh
 5. 通过 Xray 配置系统 VPN。
 6. 3x-ui 面板和本地 Cloudflare WARP 代理。
 7. 初始快照以及每日、每周或每月备份。
-8. 可选 AI 代理：Hermes、OpenClaw、OpenHands、OpenCode 或 Aider。
+8. 可选 AI 代理：Hermes、OpenClaw、OpenHands、OpenCode、Aider、AutoGPT 或 Pi Coding Agent。
 
 更改 SSH 端口时不要关闭当前会话。请先在另一个终端中测试新连接。更多说明请参阅[英文主文档](../../README.md)。

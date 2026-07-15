@@ -28,6 +28,6 @@ Die erste Frage wählt die Sprache des Installers; English ist voreingestellt. D
 5. System-VPN über Xray.
 6. 3x-ui und lokaler Cloudflare-WARP-Proxy.
 7. Erstsicherung sowie tägliche, wöchentliche oder monatliche Sicherungen.
-8. Optionale KI-Agenten: Hermes, OpenClaw, OpenHands, OpenCode oder Aider.
+8. Optionale KI-Agenten: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT oder Pi Coding Agent.
 
 Schließen Sie die aktuelle SSH-Sitzung während der Portänderung nicht. Testen Sie zuerst die neue Anmeldung in einem zweiten Terminal. Weitere Hinweise enthält die [englische Hauptdokumentation](../../README.md).

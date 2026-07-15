@@ -66,7 +66,7 @@ The wizard downloads any missing module from the `main` branch and validates it 
 | `ochenstarik-server-vpn-5.sh` | System VPN through Xray with a selectable subscription port | Optional |
 | `ochenstarik-server-panel-warp-6.sh` | 3x-ui panel and local Cloudflare WARP proxy | Optional |
 | `ochenstarik-server-backup-7.sh` | Protected initial snapshot and selected daily, weekly, or monthly schedules | Optional |
-| `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents for a regular user: Hermes, OpenClaw, OpenHands, OpenCode, or Aider | Optional |
+| `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
 | `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
 
 Every module can be downloaded and run independently:
@@ -94,7 +94,9 @@ Replace `SCRIPT_NAME.sh` with the required filename from the table.
 
 ## Optional AI agents
 
-Step 8 offers a multiple selection of five popular agents: Hermes Agent, OpenClaw, OpenHands, OpenCode, and Aider. Installers are downloaded only from each project's official HTTPS endpoint, checked with `bash -n`, and executed as the selected regular user rather than `root`.
+Step 8 offers a multiple selection of seven popular agents: Hermes Agent, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, and Pi Coding Agent. Installers are downloaded only from each project's official HTTPS endpoint, checked with `bash -n`, and launched as the selected regular user rather than directly as `root`.
+
+AutoGPT is a larger Docker-based platform. Its official installer can request `sudo`, install Docker-related dependencies, and start local services. Pi is a lightweight terminal coding agent; after installation, start it with `pi` and use `/login` to connect a supported provider.
 
 The script does not request or store model-provider API keys. After installation, log in as the selected user and run the displayed onboarding command. AI agents can execute commands, access files, install plugins, and use network services; review their permissions and sandbox settings before connecting production data or secrets.
 
