@@ -26,6 +26,9 @@ jobs:
       - name: Test step 1 selections
         run: bash tests/test-step1-selection.sh
 
+      - name: Test step 2 IPv4 firewall mode
+        run: bash tests/test-step2-ipv4-firewall.sh
+
       - name: Test master language selection
         run: bash tests/test-master-language.sh
 
