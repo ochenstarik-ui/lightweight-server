@@ -82,7 +82,7 @@ sudo ./ochenstarik-server-monitor-manager.sh hub
 После установки создайте отдельный секретный код конфигурации для каждого узла:
 
 ```bash
-sudo ochenstarik-smm node-code hermes
+sudo ochenstarik-smm node-code ai-agent
 sudo ochenstarik-smm node-code home
 sudo ochenstarik-smm node-code server2
 ```
@@ -95,12 +95,12 @@ sudo ./ochenstarik-server-monitor-manager.sh node
 
 Установщик попросит публичный SSH-ключ приложения и код, созданный для этого узла. Код содержит приватный ключ WireGuard узла: передавайте его только в защищённый терминал, используйте для одного сервера и создайте новый узел, если код стал известен посторонним.
 
-Связи направленные и управляются на Hub. Например, разрешить Hermes доступ к домашнему серверу и ко второму серверу, а затем отключить только второй маршрут:
+Связи направленные и управляются на Hub. Например, разрешить AI-агенту доступ к домашнему серверу и ко второму серверу, а затем отключить только второй маршрут:
 
 ```bash
-sudo ochenstarik-smm link-connect hermes home
-sudo ochenstarik-smm link-connect hermes server2
-sudo ochenstarik-smm link-disconnect hermes server2
+sudo ochenstarik-smm link-connect ai-agent home
+sudo ochenstarik-smm link-connect ai-agent server2
+sudo ochenstarik-smm link-disconnect ai-agent server2
 ```
 
 Проверка состояния:

@@ -517,8 +517,8 @@ EOF
     ufw route allow in on "$WG_INTERFACE" out on "$WG_INTERFACE" comment 'Server Monitor Mesh routed' >/dev/null
   fi
   log "Главный Mesh Hub установлен: ${HUB_ENDPOINT_VALUE}:${WG_PORT_VALUE}/udp"
-  log "Создать код узла: sudo ochenstarik-smm node-code hermes"
-  log "Включить связь: sudo ochenstarik-smm link-connect hermes home"
+  log "Создать код узла: sudo ochenstarik-smm node-code ai-agent"
+  log "Включить связь: sudo ochenstarik-smm link-connect ai-agent home"
 }
 
 base64url_decode() {
