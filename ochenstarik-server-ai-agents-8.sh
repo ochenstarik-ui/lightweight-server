@@ -5,13 +5,15 @@ readonly CONFIG_DIR="/etc/ochenstarik-server"
 readonly AGENT_CONFIG="${CONFIG_DIR}/ai-agents.conf"
 readonly STEP3_ENV="/root/setup-data/env.txt"
 
-readonly -a AGENT_IDS=(hermes openclaw openhands opencode aider)
+readonly -a AGENT_IDS=(hermes openclaw openhands opencode aider autogpt pi)
 readonly -a AGENT_NAMES=(
   "Hermes Agent"
   "OpenClaw"
   "OpenHands"
   "OpenCode"
   "Aider"
+  "AutoGPT"
+  "Pi Coding Agent"
 )
 readonly -a AGENT_DESCRIPTIONS=(
   "Personal self-improving agent with memory, skills, schedules, and messaging gateways"
@@ -19,6 +21,8 @@ readonly -a AGENT_DESCRIPTIONS=(
   "Software-development agent with terminal, headless, web, and IDE modes"
   "Terminal coding agent with multiple model providers and parallel sessions"
   "Git-oriented coding agent for editing and reviewing an existing repository"
+  "Docker-based platform for building, deploying, and running autonomous agents; may request sudo"
+  "Minimal and extensible terminal coding agent with skills, extensions, and multiple providers"
 )
 readonly -a AGENT_INSTALL_URLS=(
   "https://hermes-agent.nousresearch.com/install.sh"
@@ -26,14 +30,18 @@ readonly -a AGENT_INSTALL_URLS=(
   "https://install.openhands.dev/install.sh"
   "https://opencode.ai/install"
   "https://aider.chat/install.sh"
+  "https://setup.agpt.co/install.sh"
+  "https://pi.dev/install.sh"
 )
-readonly -a AGENT_COMMANDS=(hermes openclaw openhands opencode aider)
+readonly -a AGENT_COMMANDS=(hermes openclaw openhands opencode aider docker pi)
 readonly -a AGENT_SETUP_HINTS=(
   "hermes setup"
   "openclaw onboard --install-daemon"
   "openhands"
   "opencode"
   "aider"
+  "Open the local AutoGPT address printed by the official installer"
+  "pi, then use /login to connect a provider"
 )
 
 TEMP_INSTALLER=""
@@ -122,8 +130,8 @@ select_agents() {
     SELECTED_INDEXES=()
     seen=()
     for token in $input; do
-      if [[ ! "$token" =~ ^[1-5]$ ]]; then
-        warn "Enter agent numbers from 1 to 5, or 0 to skip"
+      if [[ ! "$token" =~ ^[1-7]$ ]]; then
+        warn "Enter agent numbers from 1 to 7, or 0 to skip"
         SELECTED_INDEXES=()
         break
       fi
@@ -160,7 +168,7 @@ install_agent() {
   log "Installing ${name} for ${TARGET_USER}"
   runuser -u "$TARGET_USER" -- env \
     HOME="$TARGET_HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" SHELL=/bin/bash PATH="$path_value" \
-    bash "$TEMP_INSTALLER"
+    bash -c 'cd "$HOME" && exec bash "$1"' ochenstarik-agent-installer "$TEMP_INSTALLER"
 
   rm -f -- "$TEMP_INSTALLER"
   TEMP_INSTALLER=""
@@ -195,9 +203,9 @@ require_command getent
 require_command runuser
 require_command stat
 
-((${#AGENT_IDS[@]} == 5 && ${#AGENT_NAMES[@]} == 5 \
-  && ${#AGENT_DESCRIPTIONS[@]} == 5 && ${#AGENT_INSTALL_URLS[@]} == 5 \
-  && ${#AGENT_COMMANDS[@]} == 5 && ${#AGENT_SETUP_HINTS[@]} == 5)) \
+((${#AGENT_IDS[@]} == 7 && ${#AGENT_NAMES[@]} == 7 \
+  && ${#AGENT_DESCRIPTIONS[@]} == 7 && ${#AGENT_INSTALL_URLS[@]} == 7 \
+  && ${#AGENT_COMMANDS[@]} == 7 && ${#AGENT_SETUP_HINTS[@]} == 7)) \
   || die "Invalid AI agent catalog"
 
 select_target_user

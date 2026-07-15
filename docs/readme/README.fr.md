@@ -28,6 +28,6 @@ La première question sélectionne la langue de l’installateur ; English est l
 5. VPN système via Xray.
 6. Panneau 3x-ui et proxy local Cloudflare WARP.
 7. Instantané initial et sauvegardes quotidiennes, hebdomadaires ou mensuelles.
-8. Agents IA facultatifs : Hermes, OpenClaw, OpenHands, OpenCode ou Aider.
+8. Agents IA facultatifs : Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT ou Pi Coding Agent.
 
 Ne fermez pas la session SSH actuelle pendant le changement de port. Testez d’abord la nouvelle connexion dans un autre terminal. Consultez la [documentation principale en anglais](../../README.md) pour plus de détails.

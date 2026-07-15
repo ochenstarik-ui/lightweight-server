@@ -28,6 +28,6 @@ sudo ./ochenstarik-server-install.sh
 5. VPN للنظام باستخدام Xray.
 6. لوحة 3x-ui ووكيل Cloudflare WARP المحلي.
 7. النسخة الأولية والنسخ اليومية أو الأسبوعية أو الشهرية.
-8. وكلاء ذكاء اصطناعي اختياريون: Hermes أو OpenClaw أو OpenHands أو OpenCode أو Aider.
+8. وكلاء ذكاء اصطناعي اختياريون: Hermes أو OpenClaw أو OpenHands أو OpenCode أو Aider أو AutoGPT أو Pi Coding Agent.
 
 لا تغلق جلسة SSH الحالية أثناء تغيير المنفذ. اختبر الاتصال الجديد أولاً في طرفية أخرى. راجع [الوثائق الإنجليزية الرئيسية](../../README.md) لمزيد من التفاصيل.
