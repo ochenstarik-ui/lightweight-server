@@ -326,14 +326,9 @@ if [[ "$ACTION" == install ]]; then
   apt-get update
   apt-get upgrade -y
 
-  log "Устанавливаю серверные пакеты и средства обработки документов"
+  log "Устанавливаю обязательные пакеты SSH, брандмауэра и защиты"
   apt-get install -y \
-    sudo ufw fail2ban curl ca-certificates openssl openssh-server logrotate iproute2 \
-    poppler-utils qpdf ghostscript ocrmypdf \
-    tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus \
-    libreoffice pandoc antiword catdoc imagemagick libimage-exiftool-perl webp \
-    ffmpeg mediainfo p7zip-full unzip zip unrar jq yq csvkit sqlite3 \
-    python3-pip python3-venv mc
+    sudo ufw fail2ban curl ca-certificates openssl openssh-server logrotate iproute2
 
   for command_name in ip sed sysctl ufw; do
     require_command "$command_name"

@@ -26,9 +26,13 @@ readonly XRAY_HELPER="/usr/local/sbin/ochenstarik-xray-routing"
 readonly XRAY_SERVICE="/etc/systemd/system/ochenstarik-xray-routing.service"
 readonly BACKUP_CONFIG="${CONFIG_DIR}/backup.conf"
 readonly BACKUP_RUNNER="/usr/local/sbin/ochenstarik-server-backup"
-readonly LOCALE_BACKUP="${CONFIG_DIR}/locale-before-russian.conf"
-readonly LOCALE_ABSENT_MARKER="${CONFIG_DIR}/locale-before-russian.absent"
-readonly LOCALE_PACKAGES="${CONFIG_DIR}/russian-locale-installed-packages.list"
+readonly LOCALE_BACKUP="${CONFIG_DIR}/locale-before-selection.conf"
+readonly LOCALE_ABSENT_MARKER="${CONFIG_DIR}/locale-before-selection.absent"
+readonly LOCALE_PACKAGES="${CONFIG_DIR}/locale-installed-packages.list"
+readonly LEGACY_LOCALE_BACKUP="${CONFIG_DIR}/locale-before-russian.conf"
+readonly LEGACY_LOCALE_ABSENT_MARKER="${CONFIG_DIR}/locale-before-russian.absent"
+readonly LEGACY_LOCALE_PACKAGES="${CONFIG_DIR}/russian-locale-installed-packages.list"
+readonly PROGRAM_PACKAGES="${CONFIG_DIR}/step1-installed-packages.list"
 
 log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
@@ -263,26 +267,52 @@ remove_backup_automation() {
 }
 
 restore_locale() {
-  local package_name
+  local package_name package_file
   local -a packages=()
   if [[ -f "$LOCALE_BACKUP" && ! -L "$LOCALE_BACKUP" ]]; then
     cp -a -- "$LOCALE_BACKUP" /etc/default/locale
     log "Предыдущая системная локаль восстановлена"
+  elif [[ -f "$LEGACY_LOCALE_BACKUP" && ! -L "$LEGACY_LOCALE_BACKUP" ]]; then
+    cp -a -- "$LEGACY_LOCALE_BACKUP" /etc/default/locale
+    log "Предыдущая системная локаль восстановлена"
   elif [[ -f "$LOCALE_ABSENT_MARKER" && ! -L "$LOCALE_ABSENT_MARKER" ]]; then
+    rm -f -- /etc/default/locale
+    log "Созданный скриптом файл локали удалён"
+  elif [[ -f "$LEGACY_LOCALE_ABSENT_MARKER" \
+    && ! -L "$LEGACY_LOCALE_ABSENT_MARKER" ]]; then
     rm -f -- /etc/default/locale
     log "Созданный скриптом файл локали удалён"
   fi
 
-  if [[ -f "$LOCALE_PACKAGES" && ! -L "$LOCALE_PACKAGES" ]]; then
+  for package_file in "$LOCALE_PACKAGES" "$LEGACY_LOCALE_PACKAGES"; do
+    [[ -f "$package_file" && ! -L "$package_file" ]] || continue
     while IFS= read -r package_name || [[ -n "$package_name" ]]; do
-      [[ "$package_name" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] && packages+=("$package_name")
-    done < "$LOCALE_PACKAGES"
-    if ((${#packages[@]} > 0)) && ask_yes_no \
-      "Удалить пакеты русификации, которые ранее отсутствовали?" yes; then
-      DEBIAN_FRONTEND=noninteractive apt-get purge -y "${packages[@]}"
-    fi
+      [[ "$package_name" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] \
+        && [[ ! " ${packages[*]} " =~ " ${package_name} " ]] \
+        && packages+=("$package_name")
+    done < "$package_file"
+  done
+  if ((${#packages[@]} > 0)) && ask_yes_no \
+    "Удалить языковые пакеты, которые ранее отсутствовали?" yes; then
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y "${packages[@]}"
   fi
-  rm -f -- "$LOCALE_BACKUP" "$LOCALE_ABSENT_MARKER" "$LOCALE_PACKAGES"
+  rm -f -- "$LOCALE_BACKUP" "$LOCALE_ABSENT_MARKER" "$LOCALE_PACKAGES" \
+    "$LEGACY_LOCALE_BACKUP" "$LEGACY_LOCALE_ABSENT_MARKER" \
+    "$LEGACY_LOCALE_PACKAGES"
+}
+
+remove_step1_programs() {
+  local package_name
+  local -a packages=()
+  [[ -f "$PROGRAM_PACKAGES" && ! -L "$PROGRAM_PACKAGES" ]] || return 0
+  while IFS= read -r package_name || [[ -n "$package_name" ]]; do
+    [[ "$package_name" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] && packages+=("$package_name")
+  done < "$PROGRAM_PACKAGES"
+  if ((${#packages[@]} > 0)) && ask_yes_no \
+    "Удалить дополнительные программы, установленные первым этапом?" yes; then
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y "${packages[@]}"
+  fi
+  rm -f -- "$PROGRAM_PACKAGES"
 }
 
 remove_swap() {
@@ -307,9 +337,9 @@ remove_swap() {
 cat <<'WARNING'
 
 Этот скрипт удалит настройки, службы и данные, созданные проектом lightweight-server.
-Он не откатывает обновления Ubuntu и не удаляет общие системные пакеты (OpenSSH,
-UFW, curl, мультимедийные библиотеки и другие), потому что они могли существовать
-до установки и нужны для доступа к серверу. Их наличие не мешает установке заново.
+Он не откатывает обновления Ubuntu и не удаляет обязательные общие пакеты второго
+этапа (OpenSSH, UFW и другие), потому что они нужны для доступа к серверу. Пакеты,
+которые первый этап зафиксировал как новые, можно удалить отдельным подтверждением.
 
 Сначала будет открыт SSH-порт 22. Не закрывайте текущую сессию, пока не проверите
 новый вход после очистки.
@@ -326,6 +356,7 @@ remove_xray
 remove_panel_and_warp
 remove_backup_automation
 restore_locale
+remove_step1_programs
 remove_swap
 
 rm -f -- "$SSH_PORT_CONFIG" "$IP_FAMILY_CONFIG" "$MANAGED_PORTS_CONFIG"
