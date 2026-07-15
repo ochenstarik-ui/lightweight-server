@@ -115,7 +115,7 @@ The script does not request or store model-provider API keys. After installation
 
 ## Firewall and SSH notes
 
-- Step 2 supports IPv4-only, IPv6-only, and dual-stack UFW rules.
+- Step 2 supports IPv4-only, IPv6-only, and dual-stack UFW rules. IPv4-only mode blocks public inbound IPv6 through UFW without disabling the kernel IPv6 stack.
 - A repeated step 2 run can change the IP-family mode or add ports without reinstalling everything.
 - Step 3 reads the SSH port chosen in step 2 and creates an administrator with sudo access.
 - The home directory, `.ssh`, and `authorized_keys` ownership and permissions are checked on every run.
