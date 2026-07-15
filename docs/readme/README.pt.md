@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-A primeira pergunta seleciona o idioma do instalador; English é o padrão. Depois, cada uma das sete etapas pode ser instalada, ignorada ou usada para sair.
+A primeira pergunta seleciona o idioma do instalador; English é o padrão. Depois, cada uma das oito etapas pode ser instalada, ignorada ou usada para sair.
 
 ## Etapas
 
@@ -28,5 +28,6 @@ A primeira pergunta seleciona o idioma do instalador; English é o padrão. Depo
 5. VPN do sistema por Xray.
 6. Painel 3x-ui e proxy local Cloudflare WARP.
 7. Snapshot inicial e backups diários, semanais ou mensais.
+8. Agentes de IA opcionais: Hermes, OpenClaw, OpenHands, OpenCode ou Aider.
 
 Não feche a sessão SSH atual durante a alteração da porta. Teste primeiro o novo login em outro terminal. Consulte a [documentação principal em inglês](../../README.md) para obter detalhes adicionais.

@@ -34,3 +34,6 @@ jobs:
 
       - name: Test step 3 SSH configuration parsing
         run: bash tests/test-step3-sshd-parsing.sh
+
+      - name: Test step 8 AI agent catalog
+        run: bash tests/test-step8-agent-catalog.sh

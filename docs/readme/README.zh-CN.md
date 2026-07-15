@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-安装程序的第一个问题用于选择界面语言，默认是 English。随后七个步骤都可以运行、跳过或用于退出安装程序。
+安装程序的第一个问题用于选择界面语言，默认是 English。随后八个步骤都可以运行、跳过或用于退出安装程序。
 
 ## 安装步骤
 
@@ -28,5 +28,6 @@ sudo ./ochenstarik-server-install.sh
 5. 通过 Xray 配置系统 VPN。
 6. 3x-ui 面板和本地 Cloudflare WARP 代理。
 7. 初始快照以及每日、每周或每月备份。
+8. 可选 AI 代理：Hermes、OpenClaw、OpenHands、OpenCode 或 Aider。
 
 更改 SSH 端口时不要关闭当前会话。请先在另一个终端中测试新连接。更多说明请参阅[英文主文档](../../README.md)。

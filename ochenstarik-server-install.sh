@@ -12,6 +12,7 @@ declare -a STEP_FILES=(
   "ochenstarik-server-vpn-5.sh"
   "ochenstarik-server-panel-warp-6.sh"
   "ochenstarik-server-backup-7.sh"
+  "ochenstarik-server-ai-agents-8.sh"
 )
 
 declare -a STEP_TITLES=(
@@ -22,6 +23,7 @@ declare -a STEP_TITLES=(
   "System VPN through Xray"
   "3x-ui panel and Cloudflare WARP"
   "Initial snapshot and backup schedules"
+  "Optional AI agents for a regular user"
 )
 
 TEMP_FILE=""
@@ -156,15 +158,15 @@ master_msg() {
 
 localize_step_titles() {
   case "$UI_LANG" in
-    ru) STEP_TITLES=("Часовой пояс, язык терминала, программы и swap" "Базовые пакеты, SSH-порт, IPv4/IPv6 и UFW" "Администратор, перенос SSH и fail2ban" "Telegram-уведомления о входах по SSH" "Системный VPN через Xray" "Панель 3x-ui и Cloudflare WARP" "Первичный снимок и расписания бэкапов") ;;
-    es) STEP_TITLES=("Zona horaria, idioma del terminal, programas y swap" "Paquetes base, puerto SSH, IPv4/IPv6 y UFW" "Administrador, migración SSH y fail2ban" "Notificaciones de Telegram para accesos SSH" "VPN del sistema mediante Xray" "Panel 3x-ui y Cloudflare WARP" "Instantánea inicial y copias programadas") ;;
-    de) STEP_TITLES=("Zeitzone, Terminalsprache, Programme und Swap" "Basispakete, SSH-Port, IPv4/IPv6 und UFW" "Administrator, SSH-Umstellung und fail2ban" "Telegram-Benachrichtigungen für SSH-Anmeldungen" "System-VPN über Xray" "3x-ui und Cloudflare WARP" "Erstsicherung und Sicherungspläne") ;;
-    fr) STEP_TITLES=("Fuseau horaire, langue du terminal, programmes et swap" "Paquets de base, port SSH, IPv4/IPv6 et UFW" "Administrateur, migration SSH et fail2ban" "Notifications Telegram des connexions SSH" "VPN système via Xray" "Panneau 3x-ui et Cloudflare WARP" "Instantané initial et sauvegardes planifiées") ;;
-    pt) STEP_TITLES=("Fuso horário, idioma do terminal, programas e swap" "Pacotes básicos, porta SSH, IPv4/IPv6 e UFW" "Administrador, migração SSH e fail2ban" "Notificações Telegram de logins SSH" "VPN do sistema via Xray" "Painel 3x-ui e Cloudflare WARP" "Snapshot inicial e backups agendados") ;;
-    zh) STEP_TITLES=("时区、终端语言、程序和交换文件" "基础软件包、SSH 端口、IPv4/IPv6 和 UFW" "管理员、SSH 迁移和 fail2ban" "SSH 登录的 Telegram 通知" "通过 Xray 的系统 VPN" "3x-ui 面板和 Cloudflare WARP" "初始快照和备份计划") ;;
-    ja) STEP_TITLES=("タイムゾーン、端末言語、プログラム、スワップ" "基本パッケージ、SSH ポート、IPv4/IPv6、UFW" "管理者、SSH 移行、fail2ban" "SSH ログインの Telegram 通知" "Xray によるシステム VPN" "3x-ui パネルと Cloudflare WARP" "初回スナップショットとバックアップ予定") ;;
-    ar) STEP_TITLES=("المنطقة الزمنية ولغة الطرفية والبرامج وswap" "الحزم الأساسية ومنفذ SSH وIPv4/IPv6 وUFW" "المسؤول ونقل SSH وfail2ban" "إشعارات Telegram لدخول SSH" "VPN للنظام عبر Xray" "لوحة 3x-ui وCloudflare WARP" "النسخة الأولية وجداول النسخ الاحتياطي") ;;
-    hi) STEP_TITLES=("समय क्षेत्र, टर्मिनल भाषा, प्रोग्राम और swap" "मूल पैकेज, SSH पोर्ट, IPv4/IPv6 और UFW" "प्रशासक, SSH स्थानांतरण और fail2ban" "SSH लॉगिन की Telegram सूचनाएँ" "Xray द्वारा सिस्टम VPN" "3x-ui पैनल और Cloudflare WARP" "प्रारंभिक स्नैपशॉट और बैकअप अनुसूचियाँ") ;;
+    ru) STEP_TITLES=("Часовой пояс, язык терминала, программы и swap" "Базовые пакеты, SSH-порт, IPv4/IPv6 и UFW" "Администратор, перенос SSH и fail2ban" "Telegram-уведомления о входах по SSH" "Системный VPN через Xray" "Панель 3x-ui и Cloudflare WARP" "Первичный снимок и расписания бэкапов" "AI-агенты на выбор для обычного пользователя") ;;
+    es) STEP_TITLES=("Zona horaria, idioma del terminal, programas y swap" "Paquetes base, puerto SSH, IPv4/IPv6 y UFW" "Administrador, migración SSH y fail2ban" "Notificaciones de Telegram para accesos SSH" "VPN del sistema mediante Xray" "Panel 3x-ui y Cloudflare WARP" "Instantánea inicial y copias programadas" "Agentes de IA opcionales para un usuario normal") ;;
+    de) STEP_TITLES=("Zeitzone, Terminalsprache, Programme und Swap" "Basispakete, SSH-Port, IPv4/IPv6 und UFW" "Administrator, SSH-Umstellung und fail2ban" "Telegram-Benachrichtigungen für SSH-Anmeldungen" "System-VPN über Xray" "3x-ui und Cloudflare WARP" "Erstsicherung und Sicherungspläne" "Optionale KI-Agenten für einen normalen Benutzer") ;;
+    fr) STEP_TITLES=("Fuseau horaire, langue du terminal, programmes et swap" "Paquets de base, port SSH, IPv4/IPv6 et UFW" "Administrateur, migration SSH et fail2ban" "Notifications Telegram des connexions SSH" "VPN système via Xray" "Panneau 3x-ui et Cloudflare WARP" "Instantané initial et sauvegardes planifiées" "Agents IA facultatifs pour un utilisateur standard") ;;
+    pt) STEP_TITLES=("Fuso horário, idioma do terminal, programas e swap" "Pacotes básicos, porta SSH, IPv4/IPv6 e UFW" "Administrador, migração SSH e fail2ban" "Notificações Telegram de logins SSH" "VPN do sistema via Xray" "Painel 3x-ui e Cloudflare WARP" "Snapshot inicial e backups agendados" "Agentes de IA opcionais para um usuário comum") ;;
+    zh) STEP_TITLES=("时区、终端语言、程序和交换文件" "基础软件包、SSH 端口、IPv4/IPv6 和 UFW" "管理员、SSH 迁移和 fail2ban" "SSH 登录的 Telegram 通知" "通过 Xray 的系统 VPN" "3x-ui 面板和 Cloudflare WARP" "初始快照和备份计划" "为普通用户安装可选 AI 代理") ;;
+    ja) STEP_TITLES=("タイムゾーン、端末言語、プログラム、スワップ" "基本パッケージ、SSH ポート、IPv4/IPv6、UFW" "管理者、SSH 移行、fail2ban" "SSH ログインの Telegram 通知" "Xray によるシステム VPN" "3x-ui パネルと Cloudflare WARP" "初回スナップショットとバックアップ予定" "一般ユーザー向けのオプション AI エージェント") ;;
+    ar) STEP_TITLES=("المنطقة الزمنية ولغة الطرفية والبرامج وswap" "الحزم الأساسية ومنفذ SSH وIPv4/IPv6 وUFW" "المسؤول ونقل SSH وfail2ban" "إشعارات Telegram لدخول SSH" "VPN للنظام عبر Xray" "لوحة 3x-ui وCloudflare WARP" "النسخة الأولية وجداول النسخ الاحتياطي" "وكلاء ذكاء اصطناعي اختياريون لمستخدم عادي") ;;
+    hi) STEP_TITLES=("समय क्षेत्र, टर्मिनल भाषा, प्रोग्राम और swap" "मूल पैकेज, SSH पोर्ट, IPv4/IPv6 और UFW" "प्रशासक, SSH स्थानांतरण और fail2ban" "SSH लॉगिन की Telegram सूचनाएँ" "Xray द्वारा सिस्टम VPN" "3x-ui पैनल और Cloudflare WARP" "प्रारंभिक स्नैपशॉट और बैकअप अनुसूचियाँ" "सामान्य उपयोगकर्ता के लिए वैकल्पिक AI एजेंट") ;;
   esac
 }
 
