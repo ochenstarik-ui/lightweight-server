@@ -18,5 +18,9 @@ choose_dialog_language <<< '' >/dev/null
 choose_dialog_language <<< '2' >/dev/null
 [[ "$(master_msg install)" == 'Установить / запустить этот этап' ]]
 [[ "${STEP_TITLES[0]}" == 'Часовой пояс, язык терминала, программы и swap' ]]
+[[ "${#STEP_FILES[@]}" == 8 ]]
+[[ "${#STEP_TITLES[@]}" == 8 ]]
+[[ "${STEP_FILES[7]}" == 'ochenstarik-server-ai-agents-8.sh' ]]
+[[ "${STEP_TITLES[7]}" == 'AI-агенты на выбор для обычного пользователя' ]]
 
 printf 'Master language selection tests passed.\n'

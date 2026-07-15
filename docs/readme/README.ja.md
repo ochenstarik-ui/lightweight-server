@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-最初の質問でインストーラーの言語を選択します。既定値は English です。その後、7 つの各ステップを実行、スキップ、または終了できます。
+最初の質問でインストーラーの言語を選択します。既定値は English です。その後、8 つの各ステップを実行、スキップ、または終了できます。
 
 ## ステップ
 
@@ -28,5 +28,6 @@ sudo ./ochenstarik-server-install.sh
 5. Xray によるシステム VPN。
 6. 3x-ui パネルとローカル Cloudflare WARP プロキシ。
 7. 初回スナップショットと日次、週次、月次バックアップ。
+8. オプションの AI エージェント：Hermes、OpenClaw、OpenHands、OpenCode、Aider。
 
 SSH ポートの変更中は現在のセッションを閉じないでください。別のターミナルで新しい接続を先に確認してください。詳細は[英語のメイン文書](../../README.md)を参照してください。

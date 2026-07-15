@@ -32,7 +32,7 @@ chmod 700 ./*.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then presents steps 1–7 in order. Each step can be installed, skipped, or used to exit the wizard.
+The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then presents steps 1–8 in order. Each step can be installed, skipped, or used to exit the wizard.
 
 Keep the current SSH session open while changing the SSH port. Test the new login in a second terminal before disconnecting.
 
@@ -66,6 +66,7 @@ The wizard downloads any missing module from the `main` branch and validates it 
 | `ochenstarik-server-vpn-5.sh` | System VPN through Xray with a selectable subscription port | Optional |
 | `ochenstarik-server-panel-warp-6.sh` | 3x-ui panel and local Cloudflare WARP proxy | Optional |
 | `ochenstarik-server-backup-7.sh` | Protected initial snapshot and selected daily, weekly, or monthly schedules | Optional |
+| `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents for a regular user: Hermes, OpenClaw, OpenHands, OpenCode, or Aider | Optional |
 | `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
 
 Every module can be downloaded and run independently:
@@ -89,6 +90,13 @@ Replace `SCRIPT_NAME.sh` with the required filename from the table.
 6. Optionally configure the system VPN and subscription port.
 7. Optionally deploy 3x-ui and Cloudflare WARP with selected panel and subscription ports.
 8. Optionally create the permanent initial backup and configure rotating schedules.
+9. Optionally install one or more AI agents for the administrative user.
+
+## Optional AI agents
+
+Step 8 offers a multiple selection of five popular agents: Hermes Agent, OpenClaw, OpenHands, OpenCode, and Aider. Installers are downloaded only from each project's official HTTPS endpoint, checked with `bash -n`, and executed as the selected regular user rather than `root`.
+
+The script does not request or store model-provider API keys. After installation, log in as the selected user and run the displayed onboarding command. AI agents can execute commands, access files, install plugins, and use network services; review their permissions and sandbox settings before connecting production data or secrets.
 
 ## Firewall and SSH notes
 

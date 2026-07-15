@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-Die erste Frage wählt die Sprache des Installers; English ist voreingestellt. Danach kann jeder der sieben Schritte ausgeführt, übersprungen oder zum Beenden verwendet werden.
+Die erste Frage wählt die Sprache des Installers; English ist voreingestellt. Danach kann jeder der acht Schritte ausgeführt, übersprungen oder zum Beenden verwendet werden.
 
 ## Schritte
 
@@ -28,5 +28,6 @@ Die erste Frage wählt die Sprache des Installers; English ist voreingestellt. D
 5. System-VPN über Xray.
 6. 3x-ui und lokaler Cloudflare-WARP-Proxy.
 7. Erstsicherung sowie tägliche, wöchentliche oder monatliche Sicherungen.
+8. Optionale KI-Agenten: Hermes, OpenClaw, OpenHands, OpenCode oder Aider.
 
 Schließen Sie die aktuelle SSH-Sitzung während der Portänderung nicht. Testen Sie zuerst die neue Anmeldung in einem zweiten Terminal. Weitere Hinweise enthält die [englische Hauptdokumentation](../../README.md).
