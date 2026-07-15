@@ -35,5 +35,8 @@ jobs:
       - name: Test step 3 SSH configuration parsing
         run: bash tests/test-step3-sshd-parsing.sh
 
+      - name: Test step 5 repeated-run actions
+        run: bash tests/test-step5-actions.sh
+
       - name: Test step 8 AI agent catalog
         run: bash tests/test-step8-agent-catalog.sh

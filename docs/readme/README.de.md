@@ -25,7 +25,7 @@ Die erste Frage wählt die Sprache des Installers; English ist voreingestellt. D
 2. Basispakete, SSH-Port, IPv4/IPv6 und UFW.
 3. Administrator, SSH-Schlüssel, Rechte, sudo und fail2ban.
 4. Telegram-Benachrichtigungen für SSH-Anmeldungen.
-5. System-VPN über Xray.
+5. System-VPN über Xray mit Verbinden und Trennen bei späteren Ausführungen.
 6. 3x-ui und lokaler Cloudflare-WARP-Proxy.
 7. Erstsicherung sowie tägliche, wöchentliche oder monatliche Sicherungen.
 8. Optionale KI-Agenten: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT oder Pi Coding Agent.

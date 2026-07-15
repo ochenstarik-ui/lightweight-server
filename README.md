@@ -63,7 +63,7 @@ The wizard downloads any missing module from the `main` branch and validates it 
 | `ochenstarik-server-2.sh` | Base packages, SSH port, IPv4/IPv6 mode, UFW, and port management | Yes |
 | `ochenstarik-server-user-3.sh` | Administrative user, SSH key permissions, SSH migration, sudo, and fail2ban | Run after step 2 |
 | `ochenstarik-server-tg-4.sh` | Telegram notifications for successful SSH logins | Optional |
-| `ochenstarik-server-vpn-5.sh` | System VPN through Xray with a selectable subscription port | Optional |
+| `ochenstarik-server-vpn-5.sh` | System VPN through Xray; repeated runs can connect, disconnect, reconfigure, or show status | Optional |
 | `ochenstarik-server-panel-warp-6.sh` | 3x-ui panel and local Cloudflare WARP proxy | Optional |
 | `ochenstarik-server-backup-7.sh` | Protected initial snapshot and selected daily, weekly, or monthly schedules | Optional |
 | `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
@@ -91,6 +91,19 @@ Replace `SCRIPT_NAME.sh` with the required filename from the table.
 7. Optionally deploy 3x-ui and Cloudflare WARP with selected panel and subscription ports.
 8. Optionally create the permanent initial backup and configure rotating schedules.
 9. Optionally install one or more AI agents for the administrative user.
+
+## VPN connection control
+
+After the first successful setup, running `ochenstarik-server-vpn-5.sh` again opens an action menu: connect using saved settings, disconnect while keeping the configuration, replace the subscription, or show status. The same actions are available directly:
+
+```bash
+sudo ./ochenstarik-server-vpn-5.sh --enable
+sudo ./ochenstarik-server-vpn-5.sh --disable
+sudo ./ochenstarik-server-vpn-5.sh --reconfigure
+sudo ./ochenstarik-server-vpn-5.sh --status
+```
+
+Disconnecting removes the system routing rules but keeps Xray and its configuration so the VPN can be reconnected without entering the subscription again.
 
 ## Optional AI agents
 

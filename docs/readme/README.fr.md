@@ -25,7 +25,7 @@ La première question sélectionne la langue de l’installateur ; English est l
 2. Paquets de base, port SSH, IPv4/IPv6 et UFW.
 3. Administrateur, clé SSH, permissions, sudo et fail2ban.
 4. Notifications Telegram des connexions SSH.
-5. VPN système via Xray.
+5. VPN système via Xray, avec connexion et déconnexion lors des exécutions suivantes.
 6. Panneau 3x-ui et proxy local Cloudflare WARP.
 7. Instantané initial et sauvegardes quotidiennes, hebdomadaires ou mensuelles.
 8. Agents IA facultatifs : Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT ou Pi Coding Agent.

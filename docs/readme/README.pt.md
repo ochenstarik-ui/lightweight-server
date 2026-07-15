@@ -25,7 +25,7 @@ A primeira pergunta seleciona o idioma do instalador; English é o padrão. Depo
 2. Pacotes básicos, porta SSH, IPv4/IPv6 e UFW.
 3. Administrador, chave SSH, permissões, sudo e fail2ban.
 4. Notificações Telegram para logins SSH.
-5. VPN do sistema por Xray.
+5. VPN do sistema por Xray, com conexão e desconexão nas execuções seguintes.
 6. Painel 3x-ui e proxy local Cloudflare WARP.
 7. Snapshot inicial e backups diários, semanais ou mensais.
 8. Agentes de IA opcionais: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT ou Pi Coding Agent.

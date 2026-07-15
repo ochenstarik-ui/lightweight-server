@@ -44,17 +44,107 @@ stop_rollback_timer() {
     ochenstarik-xray-rollback.service >/dev/null 2>&1 || true
 }
 
-[[ "$EUID" -eq 0 ]] || die "Запустите этот скрипт от имени root"
+vpn_is_configured() {
+  [[ -f "$XRAY_CONFIG" && ! -L "$XRAY_CONFIG" \
+    && -x "$ROUTE_HELPER" && ! -L "$ROUTE_HELPER" \
+    && -f "$ROUTE_SERVICE" && ! -L "$ROUTE_SERVICE" ]]
+}
 
-if [[ "${1:-}" == "--disable" ]]; then
+select_existing_action() {
+  local choice
+  printf '\nОбнаружена существующая конфигурация системного VPN.\n'
+  printf '  1) Подключить VPN с сохранёнными настройками\n'
+  printf '  2) Отключить VPN, сохранив настройки\n'
+  printf '  3) Переустановить VPN или заменить подписку\n'
+  printf '  4) Показать состояние VPN\n'
+  while :; do
+    read -rp 'Выберите действие [1]: ' choice || die "Ввод прерван"
+    choice="${choice:-1}"
+    case "$choice" in
+      1) ACTION=enable; return 0 ;;
+      2) ACTION=disable; return 0 ;;
+      3) ACTION=reconfigure; return 0 ;;
+      4) ACTION=status; return 0 ;;
+      *) warn "Введите номер от 1 до 4" ;;
+    esac
+  done
+}
+
+disable_vpn() {
+  stop_rollback_timer
   systemctl disable --now ochenstarik-xray-routing.service >/dev/null 2>&1 || true
-  [[ ! -x "$ROUTE_HELPER" ]] || "$ROUTE_HELPER" stop
-  log "Системная маршрутизация через Xray отключена"
+  [[ ! -x "$ROUTE_HELPER" || -L "$ROUTE_HELPER" ]] || "$ROUTE_HELPER" stop
+  log "Системная маршрутизация через Xray отключена; конфигурация сохранена"
   if command -v curl >/dev/null 2>&1; then
     printf 'Текущий внешний IP: %s\n' "$(public_ipv4)"
   fi
-  exit 0
-fi
+}
+
+enable_vpn() {
+  local direct_ip vpn_ip
+  vpn_is_configured || die "Сохранённая конфигурация VPN не найдена; выполните установку"
+  command -v xray >/dev/null 2>&1 || die "Xray не установлен"
+  xray run -test -config "$XRAY_CONFIG" || die "Xray отклонил сохранённую конфигурацию"
+  systemctl stop ochenstarik-xray-routing.service >/dev/null 2>&1 || true
+  "$ROUTE_HELPER" stop
+  direct_ip="$(public_ipv4)"
+  valid_ipv4 "$direct_ip" || die "Не удалось определить прямой внешний IPv4 перед подключением"
+  systemctl daemon-reload
+  systemctl enable --now xray.service
+  systemctl restart xray.service
+  systemctl enable --now ochenstarik-xray-routing.service
+  systemctl restart ochenstarik-xray-routing.service
+  systemctl is-active --quiet xray.service || die "Служба Xray не запущена"
+  systemctl is-active --quiet ochenstarik-xray-routing.service \
+    || die "Системная маршрутизация через VPN не запущена"
+  vpn_ip="$(public_ipv4)"
+  if ! valid_ipv4 "$vpn_ip" || [[ "$vpn_ip" == "$direct_ip" ]]; then
+    systemctl stop ochenstarik-xray-routing.service >/dev/null 2>&1 || true
+    "$ROUTE_HELPER" stop
+    die "Проверка внешнего IP не пройдена; VPN автоматически отключён"
+  fi
+  log "Системный VPN подключён с сохранёнными настройками"
+  printf 'Прямой внешний IP: %s\n' "$direct_ip"
+  printf 'Внешний IP через VPN: %s\n' "$vpn_ip"
+}
+
+show_vpn_status() {
+  if systemctl is-active --quiet ochenstarik-xray-routing.service; then
+    printf 'Системный VPN: подключён\n'
+  else
+    printf 'Системный VPN: отключён\n'
+  fi
+  printf 'Xray: %s\n' "$(systemctl is-active xray.service 2>/dev/null || true)"
+  printf 'Маршрутизация: %s\n' \
+    "$(systemctl is-active ochenstarik-xray-routing.service 2>/dev/null || true)"
+  if [[ -x "$ROUTE_HELPER" && ! -L "$ROUTE_HELPER" ]] \
+    && systemctl is-active --quiet ochenstarik-xray-routing.service; then
+    "$ROUTE_HELPER" status || warn "Не удалось полностью прочитать правила маршрутизации"
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    printf 'Текущий внешний IP: %s\n' "$(public_ipv4)"
+  fi
+}
+
+[[ "$EUID" -eq 0 ]] || die "Запустите этот скрипт от имени root"
+
+ACTION=""
+case "${1:-}" in
+  "") vpn_is_configured && select_existing_action || ACTION=reconfigure ;;
+  --enable) ACTION=enable ;;
+  --disable) ACTION=disable ;;
+  --reconfigure) ACTION=reconfigure ;;
+  --status) ACTION=status ;;
+  *) die "Использование: $0 [--enable|--disable|--reconfigure|--status]" ;;
+esac
+
+case "$ACTION" in
+  enable) enable_vpn; exit 0 ;;
+  disable) disable_vpn; exit 0 ;;
+  status) show_vpn_status; exit 0 ;;
+  reconfigure) ;;
+  *) die "Некорректное действие VPN: $ACTION" ;;
+esac
 
 export DEBIAN_FRONTEND=noninteractive
 log "Установка системных зависимостей"
@@ -359,7 +449,8 @@ printf 'IP через локальный прокси Xray: %s\n' "$PROXY_IP"
 [[ "$PROXY_IP" != "$BEFORE_IP" ]] \
   || die "IP через Xray совпадает с исходным; системная маршрутизация не включена"
 
-SSH_PORT="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }' || true)"
+SSHD_EFFECTIVE_CONFIG="$(sshd -T 2>/dev/null || true)"
+SSH_PORT="$(awk '$1 == "port" { print $2; exit }' <<< "$SSHD_EFFECTIVE_CONFIG")"
 [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || SSH_PORT="20202"
 
 install -d -m 700 -o root -g root "$STATE_DIR"
@@ -516,5 +607,8 @@ printf 'IP через Xray:  %s\n' "$PROXY_IP"
 printf 'IP после VPN:   %s\n' "$AFTER_IP"
 printf 'SSH-порт %s и ответы сервисов 443/63636 оставлены напрямую.\n' "$SSH_PORT"
 printf 'Публичный IPv6 заблокирован, чтобы исключить обход VPN.\n'
-printf '\nОтключить системный VPN:\n  %s --disable\n' "$0"
+printf '\nПодключить VPN повторно:\n  %s --enable\n' "$0"
+printf 'Отключить VPN с сохранением настроек:\n  %s --disable\n' "$0"
+printf 'Заменить подписку:\n  %s --reconfigure\n' "$0"
+printf 'Показать состояние VPN:\n  %s --status\n' "$0"
 printf 'Проверить маршрутизацию:\n  %s status\n' "$ROUTE_HELPER"

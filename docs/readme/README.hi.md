@@ -25,7 +25,7 @@ sudo ./ochenstarik-server-install.sh
 2. मूल पैकेज, SSH पोर्ट, IPv4/IPv6 और UFW।
 3. प्रशासक, SSH कुंजी, अनुमतियाँ, sudo और fail2ban।
 4. SSH लॉगिन के लिए Telegram सूचनाएँ।
-5. Xray के माध्यम से सिस्टम VPN।
+5. Xray के माध्यम से सिस्टम VPN, दोबारा चलाने पर कनेक्ट या डिस्कनेक्ट करने की सुविधा।
 6. 3x-ui पैनल और स्थानीय Cloudflare WARP प्रॉक्सी।
 7. प्रारंभिक स्नैपशॉट और दैनिक, साप्ताहिक या मासिक बैकअप।
 8. वैकल्पिक AI एजेंट: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT या Pi Coding Agent।
