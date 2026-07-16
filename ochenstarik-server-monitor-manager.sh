@@ -13,6 +13,7 @@ readonly HUB_CONFIG="${MESH_DIR}/hub.conf"
 readonly HUB_PRIVATE_KEY="${MESH_DIR}/hub.key"
 readonly LINKS_FILE="${MESH_DIR}/links"
 readonly HUB_HELPER="/usr/local/libexec/ochenstarik-smm-hub"
+readonly CONTROL_POLICY_HELPER="/usr/local/libexec/ochenstarik-smm-policy-apply"
 readonly HUB_CLI="/usr/local/sbin/ochenstarik-smm"
 readonly WG_INTERFACE="smm0"
 readonly WG_CONFIG="/etc/wireguard/${WG_INTERFACE}.conf"
@@ -31,7 +32,7 @@ readonly AGENT_ENV="${MESH_DIR}/agent.env"
 readonly CONTROL_CA_CERT="${MESH_DIR}/control-ca.crt"
 readonly CONTROL_SERVICE="/etc/systemd/system/ochenstarik-smm-control.service"
 readonly AGENT_SERVICE="/etc/systemd/system/ochenstarik-smm-agent.service"
-readonly SMM_RELEASE_VERSION="${SMM_RELEASE_VERSION:-v0.1.0-alpha.1}"
+readonly SMM_RELEASE_VERSION="${SMM_RELEASE_VERSION:-v0.1.0-alpha.2}"
 readonly SMM_RELEASE_BASE_URL="${SMM_RELEASE_BASE_URL:-https://github.com/ochenstarik-ui/server-monitor-manager/releases/download/${SMM_RELEASE_VERSION}}"
 
 log() { printf '[+] %s\n' "$*"; }
@@ -659,12 +660,46 @@ EOF
 }
 
 configure_hub_sudo() {
-  cat > /etc/sudoers.d/ochenstarik-smm-hub <<EOF
-${MONITOR_USER} ALL=(root) NOPASSWD: ${HUB_HELPER} *
-EOF
+  {
+    printf '%s ALL=(root) NOPASSWD: %s *\n' "$MONITOR_USER" "$HUB_HELPER"
+    if getent passwd "$CONTROL_USER" >/dev/null; then
+      printf '%s ALL=(root) NOPASSWD: %s *\n' "$CONTROL_USER" "$CONTROL_POLICY_HELPER"
+    fi
+  } > /etc/sudoers.d/ochenstarik-smm-hub
   chmod 0440 /etc/sudoers.d/ochenstarik-smm-hub
   visudo -cf /etc/sudoers.d/ochenstarik-smm-hub >/dev/null \
     || die "Некорректный sudoers-файл Mesh Hub"
+}
+
+create_control_policy_helper() {
+  cat > "$CONTROL_POLICY_HELPER" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly HUB_HELPER="/usr/local/libexec/ochenstarik-smm-hub"
+action="${1:-}"
+
+valid_name() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; }
+valid_protocol() { [[ "$1" == tcp || "$1" == udp ]]; }
+valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 )); }
+
+case "$action" in
+  link-connect)
+    [[ $# -eq 6 ]] || exit 2
+    valid_name "$2" && valid_name "$3" && valid_protocol "$4" && valid_port "$5" \
+      && [[ "$6" =~ ^[0-9]+$ ]] && (( $6 <= 525600 )) || exit 2
+    ;;
+  link-disconnect)
+    [[ $# -eq 5 ]] || exit 2
+    valid_name "$2" && valid_name "$3" && valid_protocol "$4" && valid_port "$5" || exit 2
+    ;;
+  *) exit 2 ;;
+esac
+
+exec "$HUB_HELPER" "$@"
+EOF
+  chown root:root "$CONTROL_POLICY_HELPER"
+  chmod 0750 "$CONTROL_POLICY_HELPER"
 }
 
 read_hub_endpoint() {
@@ -778,6 +813,7 @@ ASPNETCORE_Kestrel__Certificates__Default__Path=${CONTROL_STATE}/server.pfx
 Control__DatabasePath=${CONTROL_STATE}/control.db
 Control__CertificateAuthorityPath=${CONTROL_STATE}/control-ca.pfx
 Control__HeartbeatSeconds=30
+Control__HubHelperPath=${CONTROL_POLICY_HELPER}
 EOF
   chmod 0600 "$CONTROL_ENV"
   cat > "$CONTROL_SERVICE" <<EOF
@@ -794,7 +830,6 @@ EnvironmentFile=${CONTROL_ENV}
 ExecStart=${CONTROL_BINARY}
 Restart=on-failure
 RestartSec=10s
-NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
@@ -813,6 +848,7 @@ EOF
   chmod 0644 "$CONTROL_SERVICE"
   systemctl daemon-reload
   systemctl enable --now ochenstarik-smm-control.service
+  systemctl restart ochenstarik-smm-control.service
 }
 
 install_control_hub() {
@@ -823,6 +859,8 @@ install_control_hub() {
   download_control_layer
   ensure_system_user "$CONTROL_USER" "$CONTROL_STATE"
   install -d -m 0700 -o root -g root "$MESH_DIR"
+  create_control_policy_helper
+  configure_hub_sudo
   create_control_certificates "$endpoint"
   configure_control_service
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
@@ -914,6 +952,27 @@ create_control_join_code() {
   payload="$(printf 'VERSION=1\nNAME=%s\nURL=https://%s:%s\nTOKEN=%s\nCA=%s\n' \
     "$name" "$endpoint" "$CONTROL_PORT" "$token" "$ca")"
   printf 'SMMCTL1-%s\n' "$(printf '%s' "$payload" | base64url_encode)"
+  unset token payload ca
+}
+
+create_device_join_code() {
+  local device_id="$1" endpoint token ca payload
+  [[ -x "$CONTROL_BINARY" && -r "$CONTROL_ENV" && -r "$CONTROL_CA_CERT" ]] \
+    || die "Control Hub не установлен"
+  [[ "$device_id" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die "Некорректное имя устройства"
+  endpoint="$(awk -F= '$1 == "HUB_ENDPOINT" { print $2; exit }' "$HUB_CONFIG")"
+  token="$(
+    set -a
+    # shellcheck disable=SC1090
+    . "$CONTROL_ENV"
+    set +a
+    runuser -u "$CONTROL_USER" -m -- "$CONTROL_BINARY" device-token-create "$device_id"
+  )"
+  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Control Hub не создал device token"
+  ca="$(base64 -w0 "$CONTROL_CA_CERT")"
+  payload="$(printf 'VERSION=1\nDEVICE=%s\nURL=https://%s:%s\nTOKEN=%s\nCA=%s\n' \
+    "$device_id" "$endpoint" "$CONTROL_PORT" "$token" "$ca")"
+  printf 'SMMDEV1-%s\n' "$(printf '%s' "$payload" | base64url_encode)"
   unset token payload ca
 }
 
@@ -1162,7 +1221,8 @@ backup_state() {
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup_file="${backup_dir}/${timestamp}.tar.gz"
   for path in \
-    "$MESH_DIR" "$MONITOR_HOME" "$MONITOR_COMMAND" "$HUB_HELPER" "$HUB_CLI" "$WG_CONFIG" \
+    "$MESH_DIR" "$MONITOR_HOME" "$MONITOR_COMMAND" "$HUB_HELPER" "$HUB_CLI" \
+    "$CONTROL_POLICY_HELPER" "$WG_CONFIG" \
     /etc/systemd/system/ochenstarik-smm-firewall.service \
     /etc/systemd/system/ochenstarik-smm-firewall.timer \
     /etc/sudoers.d/ochenstarik-smm-hub \
@@ -1270,7 +1330,8 @@ uninstall_hub() {
     /etc/systemd/system/ochenstarik-smm-firewall.timer \
     /etc/sudoers.d/ochenstarik-smm-hub \
     /etc/sysctl.d/90-ochenstarik-smm-forward.conf \
-    "$HUB_HELPER" "$HUB_CLI" "$WG_CONFIG" "$CONTROL_SERVICE" "$CONTROL_ENV" "$CONTROL_CA_CERT"
+    "$HUB_HELPER" "$HUB_CLI" "$CONTROL_POLICY_HELPER" "$WG_CONFIG" \
+    "$CONTROL_SERVICE" "$CONTROL_ENV" "$CONTROL_CA_CERT"
   rm -rf -- "$CONTROL_STATE" "$(dirname "$CONTROL_BINARY")"
   getent passwd "$CONTROL_USER" >/dev/null && userdel "$CONTROL_USER" 2>/dev/null || true
   rm -rf -- "$MESH_DIR"
@@ -1290,6 +1351,7 @@ main() {
     install-control-hub) install_control_hub ;;
     install-control-agent) install_control_agent ;;
     control-code) [[ $# -eq 2 ]] || die "Использование: $0 control-code NAME"; create_control_join_code "$2" ;;
+    control-device-code) [[ $# -eq 2 ]] || die "Использование: $0 control-device-code DEVICE"; create_device_join_code "$2" ;;
     hub-code) [[ $# -eq 2 ]] || die "Использование: $0 hub-code NAME"; exec "$HUB_HELPER" node-code "$2" ;;
     status) show_status ;;
     update) update_installed ;;
@@ -1298,7 +1360,7 @@ main() {
     uninstall-node) uninstall_node ;;
     uninstall-hub) uninstall_hub ;;
     uninstall) die "Укажите роль: uninstall-monitor, uninstall-node или uninstall-hub" ;;
-    *) die "Использование: $0 {install-monitor|install-hub|install-node|install-control-hub|install-control-agent|control-code NAME|hub-code NAME|status|update|rollback|uninstall-monitor|uninstall-node|uninstall-hub}" ;;
+    *) die "Использование: $0 {install-monitor|install-hub|install-node|install-control-hub|install-control-agent|control-code NAME|control-device-code DEVICE|hub-code NAME|status|update|rollback|uninstall-monitor|uninstall-node|uninstall-hub}" ;;
   esac
 }
 

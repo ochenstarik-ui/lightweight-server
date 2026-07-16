@@ -130,6 +130,7 @@ Install the Control service after the WireGuard Hub:
 ```bash
 sudo ./ochenstarik-server-monitor-manager.sh install-control-hub
 sudo ./ochenstarik-server-monitor-manager.sh control-code home
+sudo ./ochenstarik-server-monitor-manager.sh control-device-code windows-pc
 ```
 
 Copy the resulting `SMMCTL1-...` code and install the Agent on the matching Node:
@@ -139,6 +140,8 @@ sudo ./ochenstarik-server-monitor-manager.sh install-control-agent
 ```
 
 Create a new code for every Node. The code contains the public Control CA certificate but never its private key. Release archives are verified against their published SHA-256 checksums before installation. The Hub listens on TCP `7443`; allow this port at the hosting provider firewall if an external firewall is used.
+
+`control-device-code` creates a separate operator identity for the Windows application. Agent certificates cannot list all servers, change Links, or subscribe to the operator event stream. The Control service can invoke only the dedicated `link-connect` and `link-disconnect` policy wrapper through sudo; other Hub administration commands are not granted to it.
 
 ## Installation flow
 
