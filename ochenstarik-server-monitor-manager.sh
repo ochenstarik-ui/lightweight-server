@@ -108,17 +108,17 @@ case "$original_command" in
     ;;
   "mesh connect "*)
     [[ -x "$HUB_HELPER" ]] || { echo "Mesh Hub не установлен" >&2; exit 1; }
-    read -r prefix action source target extra <<< "$original_command"
-    [[ "$prefix" == mesh && "$action" == connect && -n "$source" && -n "$target" && -z "${extra:-}" ]] \
+    read -r prefix action source target protocol port ttl extra <<< "$original_command"
+    [[ "$prefix" == mesh && "$action" == connect && -n "$ttl" && -z "${extra:-}" ]] \
       || { echo "Некорректная команда" >&2; exit 2; }
-    exec sudo -n "$HUB_HELPER" link-connect "$source" "$target"
+    exec sudo -n "$HUB_HELPER" link-connect "$source" "$target" "$protocol" "$port" "$ttl"
     ;;
   "mesh disconnect "*)
     [[ -x "$HUB_HELPER" ]] || { echo "Mesh Hub не установлен" >&2; exit 1; }
-    read -r prefix action source target extra <<< "$original_command"
-    [[ "$prefix" == mesh && "$action" == disconnect && -n "$source" && -n "$target" && -z "${extra:-}" ]] \
+    read -r prefix action source target protocol port extra <<< "$original_command"
+    [[ "$prefix" == mesh && "$action" == disconnect && -n "$port" && -z "${extra:-}" ]] \
       || { echo "Некорректная команда" >&2; exit 2; }
-    exec sudo -n "$HUB_HELPER" link-disconnect "$source" "$target"
+    exec sudo -n "$HUB_HELPER" link-disconnect "$source" "$target" "$protocol" "$port"
     ;;
   *)
     echo "Разрешены только metrics и команды mesh" >&2
@@ -374,68 +374,95 @@ node_enroll() {
   printf '\nNode зарегистрирован. Верните этот код в установщик Node:\nSMMACK1-%s\n\n' "$ack"
 }
 
-restore_firewall() {
-  local tmp source target source_ip target_ip first=true
+prune_links() {
+  local tmp source target cidr protocol port expires now target_ip
   tmp="$(mktemp)"
-  nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
+  now="$(date +%s)"
+  if [[ -f "$LINKS_FILE" ]]; then
+    while read -r source target cidr protocol port expires extra; do
+      [[ -z "${extra:-}" ]] || continue
+      valid_name "$source" && valid_name "$target" || continue
+      node_exists "$source" && node_exists "$target" || continue
+      target_ip="$(node_value "$target" ADDRESS)"
+      [[ "$cidr" == "${target_ip}/32" ]] || continue
+      [[ "$protocol" == tcp || "$protocol" == udp ]] || continue
+      [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || continue
+      [[ "$expires" =~ ^[0-9]+$ ]] || continue
+      (( expires == 0 || expires > now )) || continue
+      printf '%s %s %s %s %s %s\n' "$source" "$target" "$cidr" "$protocol" "$port" "$expires" >> "$tmp"
+    done < "$LINKS_FILE"
+  fi
+  sort -u -o "$tmp" "$tmp"
+  install -m 0600 -o root -g root "$tmp" "$LINKS_FILE"
+  rm -f -- "$tmp"
+}
+
+restore_firewall() {
+  local tmp source target cidr protocol port expires source_ip
+  prune_links
+  tmp="$(mktemp)"
   {
     printf 'table inet %s {\n' "$NFT_TABLE"
-    printf '  set links {\n    type ipv4_addr . ipv4_addr\n'
-    if [[ -s "$LINKS_FILE" ]]; then
-      printf '    elements = { '
-      while read -r source target; do
-        [[ -n "$source" && -n "$target" ]] || continue
-        node_exists "$source" && node_exists "$target" || continue
-        source_ip="$(node_value "$source" ADDRESS)"
-        target_ip="$(node_value "$target" ADDRESS)"
-        [[ "$first" == true ]] || printf ', '
-        printf '%s . %s' "$source_ip" "$target_ip"
-        first=false
-      done < "$LINKS_FILE"
-      printf ' }\n'
-    fi
-    printf '  }\n'
     printf '  chain forward {\n'
     printf '    type filter hook forward priority 10; policy accept;\n'
     printf '    iifname "%s" oifname "%s" ct state established,related accept\n' "$WG_INTERFACE" "$WG_INTERFACE"
-    printf '    iifname "%s" oifname "%s" ip saddr . ip daddr @links accept\n' "$WG_INTERFACE" "$WG_INTERFACE"
+    while read -r source target cidr protocol port expires; do
+      [[ -n "$source" ]] || continue
+      source_ip="$(node_value "$source" ADDRESS)"
+      printf '    iifname "%s" oifname "%s" ip saddr %s ip daddr %s %s dport %s accept\n' \
+        "$WG_INTERFACE" "$WG_INTERFACE" "$source_ip" "$cidr" "$protocol" "$port"
+    done < "$LINKS_FILE"
     printf '    iifname "%s" oifname "%s" drop\n' "$WG_INTERFACE" "$WG_INTERFACE"
     printf '  }\n}\n'
   } > "$tmp"
+  nft --check -f "$tmp"
+  nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
   nft -f "$tmp"
   rm -f -- "$tmp"
 }
 
 link_connect() {
-  local source="$1" target="$2" tmp
+  local source="$1" target="$2" protocol="$3" port="$4" ttl_minutes="$5"
+  local target_ip cidr expires tmp
   valid_name "$source" && valid_name "$target" || die "Некорректное имя узла"
   [[ "$source" != "$target" ]] || die "Источник и назначение совпадают"
   node_exists "$source" || die "Узел $source не найден"
   node_exists "$target" || die "Узел $target не найден"
-  if grep -Fxq "$source $target" "$LINKS_FILE" 2>/dev/null; then
-    log "Связь $source → $target уже включена"
-    return
-  fi
+  [[ "$protocol" == tcp || "$protocol" == udp ]] || die "Протокол должен быть tcp или udp"
+  [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || die "Порт должен быть от 1 до 65535"
+  [[ "$ttl_minutes" =~ ^[0-9]+$ ]] && (( ttl_minutes <= 525600 )) \
+    || die "TTL должен быть от 0 до 525600 минут"
+  target_ip="$(node_value "$target" ADDRESS)"
+  cidr="${target_ip}/32"
+  expires=0
+  (( ttl_minutes == 0 )) || expires=$(( $(date +%s) + ttl_minutes * 60 ))
   tmp="$(mktemp)"
-  { [[ ! -f "$LINKS_FILE" ]] || cat "$LINKS_FILE"; printf '%s %s\n' "$source" "$target"; } \
-    | sort -u > "$tmp"
+  if [[ -f "$LINKS_FILE" ]]; then
+    awk -v source="$source" -v target="$target" -v protocol="$protocol" -v port="$port" \
+      '!($1 == source && $2 == target && $4 == protocol && $5 == port)' "$LINKS_FILE" > "$tmp"
+  fi
+  printf '%s %s %s %s %s %s\n' "$source" "$target" "$cidr" "$protocol" "$port" "$expires" >> "$tmp"
+  sort -u -o "$tmp" "$tmp"
   install -m 0600 -o root -g root "$tmp" "$LINKS_FILE"
   rm -f -- "$tmp"
   restore_firewall
-  log "Связь $source → $target включена"
+  log "Связь $source → $target: $protocol/$port включена"
 }
 
 link_disconnect() {
-  local source="$1" target="$2" tmp
+  local source="$1" target="$2" protocol="$3" port="$4" tmp
   valid_name "$source" && valid_name "$target" || die "Некорректное имя узла"
+  [[ "$protocol" == tcp || "$protocol" == udp ]] || die "Протокол должен быть tcp или udp"
+  [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || die "Некорректный порт"
   tmp="$(mktemp)"
   if [[ -f "$LINKS_FILE" ]]; then
-    awk -v source="$source" -v target="$target" '!($1 == source && $2 == target)' "$LINKS_FILE" > "$tmp"
+    awk -v source="$source" -v target="$target" -v protocol="$protocol" -v port="$port" \
+      '!($1 == source && $2 == target && $4 == protocol && $5 == port)' "$LINKS_FILE" > "$tmp"
   fi
   install -m 0600 -o root -g root "$tmp" "$LINKS_FILE"
   rm -f -- "$tmp"
   restore_firewall
-  log "Связь $source → $target отключена"
+  log "Связь $source → $target: $protocol/$port отключена"
 }
 
 remove_node() {
@@ -477,11 +504,13 @@ list_nodes() {
 }
 
 list_links() {
-  local source target
+  local source target cidr protocol port expires
+  prune_links
   [[ -f "$LINKS_FILE" ]] || return 0
-  while read -r source target; do
+  while read -r source target cidr protocol port expires; do
     [[ -n "$source" && -n "$target" ]] || continue
-    printf 'LINK=%s|%s|enabled\n' "$source" "$target"
+    printf 'LINK=%s|%s|%s|%s|%s|%s|enabled\n' \
+      "$source" "$target" "$cidr" "$protocol" "$port" "$expires"
   done < "$LINKS_FILE"
 }
 
@@ -505,8 +534,8 @@ main() {
     node-remove) [[ $# -eq 2 ]] || die "Использование: $0 node-remove NAME"; remove_node "$2" ;;
     nodes) list_nodes ;;
     links) list_links ;;
-    link-connect) [[ $# -eq 3 ]] || die "Использование: $0 link-connect SOURCE TARGET"; link_connect "$2" "$3" ;;
-    link-disconnect) [[ $# -eq 3 ]] || die "Использование: $0 link-disconnect SOURCE TARGET"; link_disconnect "$2" "$3" ;;
+    link-connect) [[ $# -eq 6 ]] || die "Использование: $0 link-connect SOURCE TARGET tcp|udp PORT TTL_MINUTES"; link_connect "$2" "$3" "$4" "$5" "$6" ;;
+    link-disconnect) [[ $# -eq 5 ]] || die "Использование: $0 link-disconnect SOURCE TARGET tcp|udp PORT"; link_disconnect "$2" "$3" "$4" "$5" ;;
     render) render_wireguard_config ;;
     firewall-restore) restore_firewall ;;
     status) status ;;
@@ -530,15 +559,30 @@ Wants=wg-quick@${WG_INTERFACE}.service
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
 ExecStart=${HUB_HELPER} firewall-restore
 
 [Install]
 WantedBy=multi-user.target
 EOF
   chmod 0644 /etc/systemd/system/ochenstarik-smm-firewall.service
+  cat > /etc/systemd/system/ochenstarik-smm-firewall.timer <<'EOF'
+[Unit]
+Description=Expire Server Monitor mesh policies
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=ochenstarik-smm-firewall.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  chmod 0644 /etc/systemd/system/ochenstarik-smm-firewall.timer
   systemctl daemon-reload
   systemctl enable --now ochenstarik-smm-firewall.service
+  systemctl enable --now ochenstarik-smm-firewall.timer
 }
 
 configure_hub_sudo() {
@@ -611,7 +655,7 @@ EOF
   fi
   log "Главный Mesh Hub установлен: ${HUB_ENDPOINT_VALUE}:${WG_PORT_VALUE}/udp"
   log "Создать код узла: sudo ochenstarik-smm node-code ai-agent"
-  log "Включить связь: sudo ochenstarik-smm link-connect ai-agent home"
+  log "Включить SSH на 2 часа: sudo ochenstarik-smm link-connect ai-agent home tcp 22 120"
 }
 
 base64url_encode() {

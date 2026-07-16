@@ -46,3 +46,6 @@ jobs:
 
       - name: Test Server Monitor Manager enrollment
         run: bash tests/test-monitor-manager-enrollment.sh
+
+      - name: Test Server Monitor Manager Link policies
+        run: bash tests/test-monitor-manager-links.sh

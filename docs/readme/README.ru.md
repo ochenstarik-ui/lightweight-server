@@ -90,8 +90,8 @@ sudo ./ochenstarik-server-monitor-manager.sh node
 Links являются направленными:
 
 ```bash
-sudo ochenstarik-smm link-connect ai-agent home
-sudo ochenstarik-smm link-disconnect ai-agent home
+sudo ochenstarik-smm link-connect ai-agent home tcp 22 120
+sudo ochenstarik-smm link-disconnect ai-agent home tcp 22
 sudo ochenstarik-smm nodes
 sudo ochenstarik-smm links
 ```
