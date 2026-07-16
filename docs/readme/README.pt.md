@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-A primeira pergunta seleciona o idioma do instalador; English é o padrão. Depois, cada uma das oito etapas pode ser instalada, ignorada ou usada para sair.
+A primeira pergunta seleciona o idioma do instalador; English é o padrão. Depois, o menu principal mostra as oito etapas e a opção de desinstalação/redefinição.
 
 ## Etapas
 

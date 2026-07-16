@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-安装程序的第一个问题用于选择界面语言，默认是 English。随后八个步骤都可以运行、跳过或用于退出安装程序。
+安装程序的第一个问题用于选择界面语言，默认是 English。随后主菜单会显示八个步骤以及卸载/重置选项。
 
 ## 安装步骤
 

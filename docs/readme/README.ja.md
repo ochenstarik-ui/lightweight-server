@@ -17,7 +17,7 @@ chmod 700 ochenstarik-server-install.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-最初の質問でインストーラーの言語を選択します。既定値は English です。その後、8 つの各ステップを実行、スキップ、または終了できます。
+最初の質問でインストーラーの言語を選択します。既定値は English です。その後、メインメニューに 8 つのステップとアンインストール/リセット項目が表示されます。
 
 ## ステップ
 

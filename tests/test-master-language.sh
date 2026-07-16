@@ -23,8 +23,12 @@ choose_dialog_language <<< '2' >/dev/null
 [[ "${STEP_FILES[7]}" == 'ochenstarik-server-ai-agents-8.sh' ]]
 [[ "${STEP_TITLES[7]}" == 'AI-агенты на выбор для обычного пользователя' ]]
 [[ "$(master_msg main_menu)" == 'Главное меню' ]]
+[[ "$(master_msg uninstall)" == 'Удаление / сброс настроек сервера' ]]
+[[ "$UNINSTALL_TITLE" == 'Полное удаление / сброс настроек сервера' ]]
 choose_main_menu_action selected_step <<< '8' >/dev/null
 [[ "$selected_step" == 8 ]]
+choose_main_menu_action selected_step <<< '9' >/dev/null
+[[ "$selected_step" == 9 ]]
 choose_main_menu_action selected_step <<< '0' >/dev/null
 [[ "$selected_step" == 0 ]]
 
