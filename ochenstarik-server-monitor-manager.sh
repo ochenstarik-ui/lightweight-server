@@ -196,6 +196,8 @@ readonly TOKENS_DIR="${STATE_DIR}/tokens"
 readonly HUB_CONFIG="${STATE_DIR}/hub.conf"
 readonly HUB_PRIVATE_KEY="${STATE_DIR}/hub.key"
 readonly LINKS_FILE="${STATE_DIR}/links"
+readonly AUDIT_FILE="${STATE_DIR}/audit.jsonl"
+readonly VERSION_FILE="${STATE_DIR}/policy.version"
 readonly WG_INTERFACE="smm0"
 readonly WG_CONFIG="/etc/wireguard/${WG_INTERFACE}.conf"
 readonly NFT_TABLE="ochenstarik_smm"
@@ -213,6 +215,26 @@ config_value() {
 node_file() { printf '%s/%s.node' "$NODES_DIR" "$1"; }
 node_value() { config_value "$2" "$(node_file "$1")"; }
 node_exists() { [[ -f "$(node_file "$1")" ]]; }
+
+next_policy_version() {
+  local version=0 tmp
+  [[ ! -r "$VERSION_FILE" ]] || read -r version < "$VERSION_FILE"
+  [[ "$version" =~ ^[0-9]+$ ]] || version=0
+  version=$((version + 1))
+  tmp="$(mktemp)"
+  printf '%s\n' "$version" > "$tmp"
+  install -m 0600 -o root -g root "$tmp" "$VERSION_FILE"
+  rm -f -- "$tmp"
+  printf '%s' "$version"
+}
+
+audit_link() {
+  local action="$1" state="$2" source="$3" target="$4" protocol="$5" port="$6" version="$7"
+  printf '{"time":"%s","action":"%s","state":"%s","source":"%s","target":"%s","protocol":"%s","port":%s,"version":%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$state" "$source" "$target" "$protocol" "$port" "$version" \
+    >> "$AUDIT_FILE"
+  chmod 0600 "$AUDIT_FILE"
+}
 
 render_wireguard_config() {
   local tmp name file public_key address
@@ -375,11 +397,11 @@ node_enroll() {
 }
 
 prune_links() {
-  local tmp source target cidr protocol port expires now target_ip
+  local tmp source target cidr protocol port expires version now target_ip
   tmp="$(mktemp)"
   now="$(date +%s)"
   if [[ -f "$LINKS_FILE" ]]; then
-    while read -r source target cidr protocol port expires extra; do
+    while read -r source target cidr protocol port expires version extra; do
       [[ -z "${extra:-}" ]] || continue
       valid_name "$source" && valid_name "$target" || continue
       node_exists "$source" && node_exists "$target" || continue
@@ -388,8 +410,12 @@ prune_links() {
       [[ "$protocol" == tcp || "$protocol" == udp ]] || continue
       [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || continue
       [[ "$expires" =~ ^[0-9]+$ ]] || continue
-      (( expires == 0 || expires > now )) || continue
-      printf '%s %s %s %s %s %s\n' "$source" "$target" "$cidr" "$protocol" "$port" "$expires" >> "$tmp"
+      [[ "${version:-}" =~ ^[0-9]+$ ]] || version=0
+      if (( expires != 0 && expires <= now )); then
+        audit_link expire Expired "$source" "$target" "$protocol" "$port" "$version"
+        continue
+      fi
+      printf '%s %s %s %s %s %s %s\n' "$source" "$target" "$cidr" "$protocol" "$port" "$expires" "$version" >> "$tmp"
     done < "$LINKS_FILE"
   fi
   sort -u -o "$tmp" "$tmp"
@@ -398,15 +424,16 @@ prune_links() {
 }
 
 restore_firewall() {
-  local tmp source target cidr protocol port expires source_ip
+  local tmp body source target cidr protocol port expires version source_ip
   prune_links
   tmp="$(mktemp)"
+  body="$(mktemp)"
   {
     printf 'table inet %s {\n' "$NFT_TABLE"
     printf '  chain forward {\n'
     printf '    type filter hook forward priority 10; policy accept;\n'
     printf '    iifname "%s" oifname "%s" ct state established,related accept\n' "$WG_INTERFACE" "$WG_INTERFACE"
-    while read -r source target cidr protocol port expires; do
+    while read -r source target cidr protocol port expires version; do
       [[ -n "$source" ]] || continue
       source_ip="$(node_value "$source" ADDRESS)"
       printf '    iifname "%s" oifname "%s" ip saddr %s ip daddr %s %s dport %s accept\n' \
@@ -414,16 +441,22 @@ restore_firewall() {
     done < "$LINKS_FILE"
     printf '    iifname "%s" oifname "%s" drop\n' "$WG_INTERFACE" "$WG_INTERFACE"
     printf '  }\n}\n'
-  } > "$tmp"
-  nft --check -f "$tmp"
-  nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
-  nft -f "$tmp"
+  } > "$body"
+  if nft list table inet "$NFT_TABLE" >/dev/null 2>&1; then
+    printf 'delete table inet %s\n' "$NFT_TABLE" > "$tmp"
+  fi
+  cat "$body" >> "$tmp"
+  rm -f -- "$body"
+  if ! nft --check -f "$tmp" || ! nft -f "$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
   rm -f -- "$tmp"
 }
 
 link_connect() {
   local source="$1" target="$2" protocol="$3" port="$4" ttl_minutes="$5"
-  local target_ip cidr expires tmp
+  local target_ip cidr expires version tmp
   valid_name "$source" && valid_name "$target" || die "Некорректное имя узла"
   [[ "$source" != "$target" ]] || die "Источник и назначение совпадают"
   node_exists "$source" || die "Узел $source не найден"
@@ -436,24 +469,33 @@ link_connect() {
   cidr="${target_ip}/32"
   expires=0
   (( ttl_minutes == 0 )) || expires=$(( $(date +%s) + ttl_minutes * 60 ))
+  version="$(next_policy_version)"
+  audit_link connect Connecting "$source" "$target" "$protocol" "$port" "$version"
   tmp="$(mktemp)"
   if [[ -f "$LINKS_FILE" ]]; then
     awk -v source="$source" -v target="$target" -v protocol="$protocol" -v port="$port" \
       '!($1 == source && $2 == target && $4 == protocol && $5 == port)' "$LINKS_FILE" > "$tmp"
   fi
-  printf '%s %s %s %s %s %s\n' "$source" "$target" "$cidr" "$protocol" "$port" "$expires" >> "$tmp"
+  printf '%s %s %s %s %s %s %s\n' "$source" "$target" "$cidr" "$protocol" "$port" "$expires" "$version" >> "$tmp"
   sort -u -o "$tmp" "$tmp"
   install -m 0600 -o root -g root "$tmp" "$LINKS_FILE"
   rm -f -- "$tmp"
-  restore_firewall
+  if ! restore_firewall; then
+    audit_link connect Failed "$source" "$target" "$protocol" "$port" "$version"
+    die "Не удалось применить nftables policy"
+  fi
+  audit_link connect Active "$source" "$target" "$protocol" "$port" "$version"
   log "Связь $source → $target: $protocol/$port включена"
+  printf 'LINK_STATE=Active|VERSION=%s\n' "$version"
 }
 
 link_disconnect() {
-  local source="$1" target="$2" protocol="$3" port="$4" tmp
+  local source="$1" target="$2" protocol="$3" port="$4" version tmp
   valid_name "$source" && valid_name "$target" || die "Некорректное имя узла"
   [[ "$protocol" == tcp || "$protocol" == udp ]] || die "Протокол должен быть tcp или udp"
   [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || die "Некорректный порт"
+  version="$(next_policy_version)"
+  audit_link disconnect Disconnecting "$source" "$target" "$protocol" "$port" "$version"
   tmp="$(mktemp)"
   if [[ -f "$LINKS_FILE" ]]; then
     awk -v source="$source" -v target="$target" -v protocol="$protocol" -v port="$port" \
@@ -461,8 +503,13 @@ link_disconnect() {
   fi
   install -m 0600 -o root -g root "$tmp" "$LINKS_FILE"
   rm -f -- "$tmp"
-  restore_firewall
+  if ! restore_firewall; then
+    audit_link disconnect Failed "$source" "$target" "$protocol" "$port" "$version"
+    die "Не удалось применить отключение в nftables"
+  fi
+  audit_link disconnect Disabled "$source" "$target" "$protocol" "$port" "$version"
   log "Связь $source → $target: $protocol/$port отключена"
+  printf 'LINK_STATE=Disabled|VERSION=%s\n' "$version"
 }
 
 remove_node() {
@@ -504,13 +551,13 @@ list_nodes() {
 }
 
 list_links() {
-  local source target cidr protocol port expires
+  local source target cidr protocol port expires version
   prune_links
   [[ -f "$LINKS_FILE" ]] || return 0
-  while read -r source target cidr protocol port expires; do
+  while read -r source target cidr protocol port expires version; do
     [[ -n "$source" && -n "$target" ]] || continue
-    printf 'LINK=%s|%s|%s|%s|%s|%s|enabled\n' \
-      "$source" "$target" "$cidr" "$protocol" "$port" "$expires"
+    printf 'LINK=%s|%s|%s|%s|%s|%s|Active|%s\n' \
+      "$source" "$target" "$cidr" "$protocol" "$port" "$expires" "$version"
   done < "$LINKS_FILE"
 }
 
@@ -637,6 +684,10 @@ install_hub() {
   chmod 0600 "$HUB_CONFIG"
   touch "$LINKS_FILE"
   chmod 0600 "$LINKS_FILE"
+  touch "${MESH_DIR}/audit.jsonl"
+  chmod 0600 "${MESH_DIR}/audit.jsonl"
+  [[ -f "${MESH_DIR}/policy.version" ]] || printf '0\n' > "${MESH_DIR}/policy.version"
+  chmod 0600 "${MESH_DIR}/policy.version"
   create_hub_helper
   "$HUB_HELPER" render
   "$HUB_HELPER" firewall-restore

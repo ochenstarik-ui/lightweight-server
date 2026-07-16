@@ -58,14 +58,17 @@ printf 'legacy-policy home\n' > "$state/links"
 PATH="$mock_bin:$PATH" NFT_CAPTURE="$nft_capture" \
   "$helper" link-connect ai-agent home tcp 2222 120
 
-read -r source target cidr protocol port expires < "$state/links"
+read -r source target cidr protocol port expires version < "$state/links"
 [[ "$source" == ai-agent ]]
 [[ "$target" == home ]]
 [[ "$cidr" == 10.77.0.3/32 ]]
 [[ "$protocol" == tcp ]]
 [[ "$port" == 2222 ]]
 (( expires > $(date +%s) ))
+[[ "$version" =~ ^[0-9]+$ ]]
 grep -Fq 'ip saddr 10.77.0.2 ip daddr 10.77.0.3/32 tcp dport 2222 accept' "$nft_capture"
+grep -Fq '"state":"Connecting"' "$state/audit.jsonl"
+grep -Fq '"state":"Active"' "$state/audit.jsonl"
 
 if PATH="$mock_bin:$PATH" NFT_CAPTURE="$nft_capture" \
   "$helper" link-connect ai-agent home tcp 70000 120 >/dev/null 2>&1; then
@@ -73,13 +76,16 @@ if PATH="$mock_bin:$PATH" NFT_CAPTURE="$nft_capture" \
   exit 1
 fi
 
-printf 'ai-agent home 10.77.0.3/32 udp 53 1\n' >> "$state/links"
+printf 'ai-agent home 10.77.0.3/32 udp 53 1 99\n' >> "$state/links"
 PATH="$mock_bin:$PATH" NFT_CAPTURE="$nft_capture" "$helper" firewall-restore
 [[ "$(wc -l < "$state/links")" -eq 1 ]]
 
 PATH="$mock_bin:$PATH" NFT_CAPTURE="$nft_capture" \
   "$helper" link-disconnect ai-agent home tcp 2222
 [[ ! -s "$state/links" ]]
+grep -Fq '"state":"Expired"' "$state/audit.jsonl"
+grep -Fq '"state":"Disconnecting"' "$state/audit.jsonl"
+grep -Fq '"state":"Disabled"' "$state/audit.jsonl"
 if grep -Fq 'dport 2222 accept' "$nft_capture"; then
   echo 'Disconnected policy remained in nftables.' >&2
   exit 1
