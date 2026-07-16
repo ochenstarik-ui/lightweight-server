@@ -278,13 +278,11 @@ apply_ip_mode_and_firewall() {
   if [[ "$IP_MODE" == ipv4 ]]; then
     restore_ipv6_stack_if_managed
     set_ufw_ipv6_setting yes
-    ufw reload >/dev/null 2>&1 || true
     delete_managed_ufw_rules
   else
     enable_ipv6_systemwide
     [[ "$IP_MODE" != ipv6 ]] || verify_ipv6_connectivity
     set_ufw_ipv6_setting yes
-    ufw reload >/dev/null 2>&1 || true
     delete_managed_ufw_rules
   fi
 
@@ -295,6 +293,7 @@ apply_ip_mode_and_firewall() {
     allow_rule_for_selected_families "$rule"
   done
   ufw --force enable
+  ufw reload >/dev/null 2>&1 || true
   [[ ! -L "$IP_FAMILY_CONFIG" ]] \
     || die "Отказ от записи через символическую ссылку: $IP_FAMILY_CONFIG"
   printf 'IP_MODE=%s\n' "$IP_MODE" > "$IP_FAMILY_CONFIG"
