@@ -319,125 +319,6 @@ base64url_decode() {
   printf '%s' "$data" | base64 -d
 }
 
-create_control_join_code() {
-  local name="$1" endpoint token ca payload
-  [[ -x "$CONTROL_BINARY" && -r "$CONTROL_ENV" && -r "$CONTROL_CA_CERT" ]] \
-    || die "Control Hub не установлен"
-  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя Agent"
-  endpoint="$(awk -F= '$1 == "HUB_ENDPOINT" { print $2; exit }' "$HUB_CONFIG")"
-  token="$(
-    set -a
-    # shellcheck disable=SC1090
-    . "$CONTROL_ENV"
-    set +a
-    runuser -u "$CONTROL_USER" -m -- "$CONTROL_BINARY" token-create "$name"
-  )"
-  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Control Hub не создал enrollment token"
-  ca="$(base64 -w0 "$CONTROL_CA_CERT")"
-  payload="$(printf 'VERSION=1\nNAME=%s\nURL=https://%s:%s\nTOKEN=%s\nCA=%s\n' \
-    "$name" "$endpoint" "$CONTROL_PORT" "$token" "$ca")"
-  printf 'SMMCTL1-%s\n' "$(printf '%s' "$payload" | base64url_encode)"
-  unset token payload ca
-}
-
-read_control_join_code() {
-  if [[ -n "${SMM_CONTROL_CODE:-}" ]]; then
-    CONTROL_JOIN_CODE="$SMM_CONTROL_CODE"
-  elif [[ -r /dev/tty ]]; then
-    printf '\nНа Hub выполните: sudo %s control-code ИМЯ\n' "$0"
-    IFS= read -r -s -p 'Вставьте одноразовый код SMMCTL1: ' CONTROL_JOIN_CODE < /dev/tty
-    printf '\n'
-  else
-    die "Передайте код через SMM_CONTROL_CODE"
-  fi
-  CONTROL_JOIN_CODE="${CONTROL_JOIN_CODE//$'\r'/}"
-  [[ "$CONTROL_JOIN_CODE" == SMMCTL1-* ]] || die "Ожидается код формата SMMCTL1-..."
-}
-
-configure_agent_service() {
-  local node_id="$1" control_url="$2" ca_path="${AGENT_STATE}/control-ca.crt"
-  cat > "$AGENT_ENV" <<EOF
-SMM_NodeId=${node_id}
-SMM_ControlUrl=${control_url}
-SMM_StateDirectory=${AGENT_STATE}
-SMM_CertificateAuthorityPath=${ca_path}
-SMM_HeartbeatSeconds=30
-EOF
-  chmod 0600 "$AGENT_ENV"
-  cat > "$AGENT_SERVICE" <<EOF
-[Unit]
-Description=Ochenstarik Server Monitor Manager Agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${AGENT_USER}
-Group=${AGENT_USER}
-EnvironmentFile=${AGENT_ENV}
-ExecStart=${AGENT_BINARY}
-Restart=on-failure
-RestartSec=10s
-NoNewPrivileges=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectSystem=strict
-ProtectHome=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-LockPersonality=true
-RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=${AGENT_STATE}
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  chmod 0644 "$AGENT_SERVICE"
-}
-
-install_control_agent() {
-  local payload version name control_url token ca temporary ca_path
-  read_control_join_code
-  payload="$(base64url_decode "${CONTROL_JOIN_CODE#SMMCTL1-}")" \
-    || die "Не удалось декодировать control code"
-  version="$(payload_value "$payload" VERSION)"
-  name="$(payload_value "$payload" NAME)"
-  control_url="$(payload_value "$payload" URL)"
-  token="$(payload_value "$payload" TOKEN)"
-  ca="$(payload_value "$payload" CA)"
-  [[ "$version" == 1 ]] || die "Неподдерживаемая версия control code"
-  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя Agent"
-  [[ "$control_url" =~ ^https://[A-Za-z0-9.-]+:[0-9]{1,5}$ ]] || die "Некорректный Control URL"
-  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Некорректный control token"
-  temporary="$(mktemp)"
-  trap 'rm -f -- "${temporary:-}"' RETURN
-  printf '%s' "$ca" | base64 -d > "$temporary" 2>/dev/null \
-    || die "Некорректный CA в control code"
-  openssl x509 -in "$temporary" -noout -checkend 86400 >/dev/null \
-    || die "Control CA недействителен или скоро истекает"
-  download_control_layer
-  ensure_system_user "$AGENT_USER" "$AGENT_STATE"
-  install -d -m 0700 -o root -g root "$MESH_DIR"
-  ca_path="${AGENT_STATE}/control-ca.crt"
-  install -m 0600 -o "$AGENT_USER" -g "$AGENT_USER" "$temporary" "$ca_path"
-  configure_agent_service "$name" "$control_url"
-  runuser -u "$AGENT_USER" -- env \
-    "SMM_NodeId=${name}" \
-    "SMM_ControlUrl=${control_url}" \
-    "SMM_StateDirectory=${AGENT_STATE}" \
-    "SMM_CertificateAuthorityPath=${ca_path}" \
-    "SMM_EnrollToken=${token}" \
-    "$AGENT_BINARY"
-  systemctl daemon-reload
-  systemctl enable --now ochenstarik-smm-agent.service
-  trap - RETURN
-  rm -f -- "$temporary"
-  unset token payload ca CONTROL_JOIN_CODE SMM_CONTROL_CODE
-  log "Control Agent $name зарегистрирован и запущен"
-}
-
 payload_value() {
   local payload="$1" key="$2"
   printf '%s\n' "$payload" | awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
@@ -1013,6 +894,125 @@ base64url_decode() {
 payload_value() {
   local payload="$1" key="$2"
   printf '%s\n' "$payload" | awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+create_control_join_code() {
+  local name="$1" endpoint token ca payload
+  [[ -x "$CONTROL_BINARY" && -r "$CONTROL_ENV" && -r "$CONTROL_CA_CERT" ]] \
+    || die "Control Hub не установлен"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя Agent"
+  endpoint="$(awk -F= '$1 == "HUB_ENDPOINT" { print $2; exit }' "$HUB_CONFIG")"
+  token="$(
+    set -a
+    # shellcheck disable=SC1090
+    . "$CONTROL_ENV"
+    set +a
+    runuser -u "$CONTROL_USER" -m -- "$CONTROL_BINARY" token-create "$name"
+  )"
+  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Control Hub не создал enrollment token"
+  ca="$(base64 -w0 "$CONTROL_CA_CERT")"
+  payload="$(printf 'VERSION=1\nNAME=%s\nURL=https://%s:%s\nTOKEN=%s\nCA=%s\n' \
+    "$name" "$endpoint" "$CONTROL_PORT" "$token" "$ca")"
+  printf 'SMMCTL1-%s\n' "$(printf '%s' "$payload" | base64url_encode)"
+  unset token payload ca
+}
+
+read_control_join_code() {
+  if [[ -n "${SMM_CONTROL_CODE:-}" ]]; then
+    CONTROL_JOIN_CODE="$SMM_CONTROL_CODE"
+  elif [[ -r /dev/tty ]]; then
+    printf '\nНа Hub выполните: sudo %s control-code ИМЯ\n' "$0"
+    IFS= read -r -s -p 'Вставьте одноразовый код SMMCTL1: ' CONTROL_JOIN_CODE < /dev/tty
+    printf '\n'
+  else
+    die "Передайте код через SMM_CONTROL_CODE"
+  fi
+  CONTROL_JOIN_CODE="${CONTROL_JOIN_CODE//$'\r'/}"
+  [[ "$CONTROL_JOIN_CODE" == SMMCTL1-* ]] || die "Ожидается код формата SMMCTL1-..."
+}
+
+configure_agent_service() {
+  local node_id="$1" control_url="$2" ca_path="${AGENT_STATE}/control-ca.crt"
+  cat > "$AGENT_ENV" <<EOF
+SMM_NodeId=${node_id}
+SMM_ControlUrl=${control_url}
+SMM_StateDirectory=${AGENT_STATE}
+SMM_CertificateAuthorityPath=${ca_path}
+SMM_HeartbeatSeconds=30
+EOF
+  chmod 0600 "$AGENT_ENV"
+  cat > "$AGENT_SERVICE" <<EOF
+[Unit]
+Description=Ochenstarik Server Monitor Manager Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${AGENT_USER}
+Group=${AGENT_USER}
+EnvironmentFile=${AGENT_ENV}
+ExecStart=${AGENT_BINARY}
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=${AGENT_STATE}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "$AGENT_SERVICE"
+}
+
+install_control_agent() {
+  local payload version name control_url token ca temporary ca_path
+  read_control_join_code
+  payload="$(base64url_decode "${CONTROL_JOIN_CODE#SMMCTL1-}")" \
+    || die "Не удалось декодировать control code"
+  version="$(payload_value "$payload" VERSION)"
+  name="$(payload_value "$payload" NAME)"
+  control_url="$(payload_value "$payload" URL)"
+  token="$(payload_value "$payload" TOKEN)"
+  ca="$(payload_value "$payload" CA)"
+  [[ "$version" == 1 ]] || die "Неподдерживаемая версия control code"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя Agent"
+  [[ "$control_url" =~ ^https://[A-Za-z0-9.-]+:[0-9]{1,5}$ ]] || die "Некорректный Control URL"
+  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Некорректный control token"
+  temporary="$(mktemp)"
+  trap 'rm -f -- "${temporary:-}"' RETURN
+  printf '%s' "$ca" | base64 -d > "$temporary" 2>/dev/null \
+    || die "Некорректный CA в control code"
+  openssl x509 -in "$temporary" -noout -checkend 86400 >/dev/null \
+    || die "Control CA недействителен или скоро истекает"
+  download_control_layer
+  ensure_system_user "$AGENT_USER" "$AGENT_STATE"
+  install -d -m 0700 -o root -g root "$MESH_DIR"
+  ca_path="${AGENT_STATE}/control-ca.crt"
+  install -m 0600 -o "$AGENT_USER" -g "$AGENT_USER" "$temporary" "$ca_path"
+  configure_agent_service "$name" "$control_url"
+  runuser -u "$AGENT_USER" -- env \
+    "SMM_NodeId=${name}" \
+    "SMM_ControlUrl=${control_url}" \
+    "SMM_StateDirectory=${AGENT_STATE}" \
+    "SMM_CertificateAuthorityPath=${ca_path}" \
+    "SMM_EnrollToken=${token}" \
+    "$AGENT_BINARY"
+  systemctl daemon-reload
+  systemctl enable --now ochenstarik-smm-agent.service
+  trap - RETURN
+  rm -f -- "$temporary"
+  unset token payload ca CONTROL_JOIN_CODE SMM_CONTROL_CODE
+  log "Control Agent $name зарегистрирован и запущен"
 }
 
 read_join_code() {
