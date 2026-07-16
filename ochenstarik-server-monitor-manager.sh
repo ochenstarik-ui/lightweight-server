@@ -32,7 +32,7 @@ readonly AGENT_ENV="${MESH_DIR}/agent.env"
 readonly CONTROL_CA_CERT="${MESH_DIR}/control-ca.crt"
 readonly CONTROL_SERVICE="/etc/systemd/system/ochenstarik-smm-control.service"
 readonly AGENT_SERVICE="/etc/systemd/system/ochenstarik-smm-agent.service"
-readonly SMM_RELEASE_VERSION="${SMM_RELEASE_VERSION:-v0.1.0-alpha.2}"
+readonly SMM_RELEASE_VERSION="${SMM_RELEASE_VERSION:-v0.1.0-alpha.3}"
 readonly SMM_RELEASE_BASE_URL="${SMM_RELEASE_BASE_URL:-https://github.com/ochenstarik-ui/server-monitor-manager/releases/download/${SMM_RELEASE_VERSION}}"
 
 log() { printf '[+] %s\n' "$*"; }
