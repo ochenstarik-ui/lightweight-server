@@ -55,3 +55,6 @@ jobs:
 
       - name: Test Server Monitor Manager extended metrics
         run: bash tests/test-monitor-manager-metrics.sh
+
+      - name: Test Server Monitor Manager control layer installer
+        run: bash tests/test-monitor-manager-control-layer.sh

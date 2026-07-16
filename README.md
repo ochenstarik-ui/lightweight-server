@@ -121,6 +121,25 @@ sudo ./ochenstarik-server-monitor-manager.sh uninstall-hub
 sudo ./ochenstarik-server-monitor-manager.sh uninstall-monitor
 ```
 
+### Experimental persistent control layer
+
+The first persistent Hub/Agent layer is available as an alpha for three-server testing. It uses self-contained single-file binaries, SQLite on the Hub, one-time enrollment codes, and outbound mTLS heartbeats from Nodes. The existing SSH/WireGuard layer remains installed as a fallback while this alpha is tested.
+
+Install the Control service after the WireGuard Hub:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh install-control-hub
+sudo ./ochenstarik-server-monitor-manager.sh control-code home
+```
+
+Copy the resulting `SMMCTL1-...` code and install the Agent on the matching Node:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh install-control-agent
+```
+
+Create a new code for every Node. The code contains the public Control CA certificate but never its private key. Release archives are verified against their published SHA-256 checksums before installation. The Hub listens on TCP `7443`; allow this port at the hosting provider firewall if an external firewall is used.
+
 ## Installation flow
 
 1. Select the wizard dialog language.

@@ -19,6 +19,20 @@ readonly WG_CONFIG="/etc/wireguard/${WG_INTERFACE}.conf"
 readonly MESH_CIDR="10.77.0.0/24"
 readonly HUB_ADDRESS="10.77.0.1"
 readonly DEFAULT_WG_PORT="51820"
+readonly CONTROL_PORT="7443"
+readonly CONTROL_USER="ochenstarik-smm-control"
+readonly AGENT_USER="ochenstarik-smm-agent"
+readonly CONTROL_STATE="${MONITOR_HOME}/control"
+readonly AGENT_STATE="${MONITOR_HOME}/agent"
+readonly CONTROL_BINARY="/usr/local/lib/${APP_NAME}/control/ochenstarik-smm-control"
+readonly AGENT_BINARY="/usr/local/lib/${APP_NAME}/agent/ochenstarik-smm-agent"
+readonly CONTROL_ENV="${MESH_DIR}/control.env"
+readonly AGENT_ENV="${MESH_DIR}/agent.env"
+readonly CONTROL_CA_CERT="${MESH_DIR}/control-ca.crt"
+readonly CONTROL_SERVICE="/etc/systemd/system/ochenstarik-smm-control.service"
+readonly AGENT_SERVICE="/etc/systemd/system/ochenstarik-smm-agent.service"
+readonly SMM_RELEASE_VERSION="${SMM_RELEASE_VERSION:-v0.1.0-alpha.1}"
+readonly SMM_RELEASE_BASE_URL="${SMM_RELEASE_BASE_URL:-https://github.com/ochenstarik-ui/server-monitor-manager/releases/download/${SMM_RELEASE_VERSION}}"
 
 log() { printf '[+] %s\n' "$*"; }
 warn() { printf '[!] %s\n' "$*" >&2; }
@@ -303,6 +317,125 @@ base64url_decode() {
   elif (( remainder == 1 )); then return 1
   fi
   printf '%s' "$data" | base64 -d
+}
+
+create_control_join_code() {
+  local name="$1" endpoint token ca payload
+  [[ -x "$CONTROL_BINARY" && -r "$CONTROL_ENV" && -r "$CONTROL_CA_CERT" ]] \
+    || die "Control Hub не установлен"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя Agent"
+  endpoint="$(awk -F= '$1 == "HUB_ENDPOINT" { print $2; exit }' "$HUB_CONFIG")"
+  token="$(
+    set -a
+    # shellcheck disable=SC1090
+    . "$CONTROL_ENV"
+    set +a
+    runuser -u "$CONTROL_USER" -m -- "$CONTROL_BINARY" token-create "$name"
+  )"
+  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Control Hub не создал enrollment token"
+  ca="$(base64 -w0 "$CONTROL_CA_CERT")"
+  payload="$(printf 'VERSION=1\nNAME=%s\nURL=https://%s:%s\nTOKEN=%s\nCA=%s\n' \
+    "$name" "$endpoint" "$CONTROL_PORT" "$token" "$ca")"
+  printf 'SMMCTL1-%s\n' "$(printf '%s' "$payload" | base64url_encode)"
+  unset token payload ca
+}
+
+read_control_join_code() {
+  if [[ -n "${SMM_CONTROL_CODE:-}" ]]; then
+    CONTROL_JOIN_CODE="$SMM_CONTROL_CODE"
+  elif [[ -r /dev/tty ]]; then
+    printf '\nНа Hub выполните: sudo %s control-code ИМЯ\n' "$0"
+    IFS= read -r -s -p 'Вставьте одноразовый код SMMCTL1: ' CONTROL_JOIN_CODE < /dev/tty
+    printf '\n'
+  else
+    die "Передайте код через SMM_CONTROL_CODE"
+  fi
+  CONTROL_JOIN_CODE="${CONTROL_JOIN_CODE//$'\r'/}"
+  [[ "$CONTROL_JOIN_CODE" == SMMCTL1-* ]] || die "Ожидается код формата SMMCTL1-..."
+}
+
+configure_agent_service() {
+  local node_id="$1" control_url="$2" ca_path="${AGENT_STATE}/control-ca.crt"
+  cat > "$AGENT_ENV" <<EOF
+SMM_NodeId=${node_id}
+SMM_ControlUrl=${control_url}
+SMM_StateDirectory=${AGENT_STATE}
+SMM_CertificateAuthorityPath=${ca_path}
+SMM_HeartbeatSeconds=30
+EOF
+  chmod 0600 "$AGENT_ENV"
+  cat > "$AGENT_SERVICE" <<EOF
+[Unit]
+Description=Ochenstarik Server Monitor Manager Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${AGENT_USER}
+Group=${AGENT_USER}
+EnvironmentFile=${AGENT_ENV}
+ExecStart=${AGENT_BINARY}
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=${AGENT_STATE}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "$AGENT_SERVICE"
+}
+
+install_control_agent() {
+  local payload version name control_url token ca temporary ca_path
+  read_control_join_code
+  payload="$(base64url_decode "${CONTROL_JOIN_CODE#SMMCTL1-}")" \
+    || die "Не удалось декодировать control code"
+  version="$(payload_value "$payload" VERSION)"
+  name="$(payload_value "$payload" NAME)"
+  control_url="$(payload_value "$payload" URL)"
+  token="$(payload_value "$payload" TOKEN)"
+  ca="$(payload_value "$payload" CA)"
+  [[ "$version" == 1 ]] || die "Неподдерживаемая версия control code"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя Agent"
+  [[ "$control_url" =~ ^https://[A-Za-z0-9.-]+:[0-9]{1,5}$ ]] || die "Некорректный Control URL"
+  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || die "Некорректный control token"
+  temporary="$(mktemp)"
+  trap 'rm -f -- "${temporary:-}"' RETURN
+  printf '%s' "$ca" | base64 -d > "$temporary" 2>/dev/null \
+    || die "Некорректный CA в control code"
+  openssl x509 -in "$temporary" -noout -checkend 86400 >/dev/null \
+    || die "Control CA недействителен или скоро истекает"
+  download_control_layer
+  ensure_system_user "$AGENT_USER" "$AGENT_STATE"
+  install -d -m 0700 -o root -g root "$MESH_DIR"
+  ca_path="${AGENT_STATE}/control-ca.crt"
+  install -m 0600 -o "$AGENT_USER" -g "$AGENT_USER" "$temporary" "$ca_path"
+  configure_agent_service "$name" "$control_url"
+  runuser -u "$AGENT_USER" -- env \
+    "SMM_NodeId=${name}" \
+    "SMM_ControlUrl=${control_url}" \
+    "SMM_StateDirectory=${AGENT_STATE}" \
+    "SMM_CertificateAuthorityPath=${ca_path}" \
+    "SMM_EnrollToken=${token}" \
+    "$AGENT_BINARY"
+  systemctl daemon-reload
+  systemctl enable --now ochenstarik-smm-agent.service
+  trap - RETURN
+  rm -f -- "$temporary"
+  unset token payload ca CONTROL_JOIN_CODE SMM_CONTROL_CODE
+  log "Control Agent $name зарегистрирован и запущен"
 }
 
 payload_value() {
@@ -679,6 +812,145 @@ read_hub_endpoint() {
   WG_PORT_VALUE="$port"
 }
 
+runtime_id() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf 'linux-x64\n' ;;
+    aarch64|arm64) printf 'linux-arm64\n' ;;
+    *) die "Control layer поддерживает только amd64 и arm64" ;;
+  esac
+}
+
+download_control_layer() {
+  local runtime archive archive_name checksum temporary
+  runtime="$(runtime_id)"
+  archive_name="server-monitor-manager-${runtime}.tar.gz"
+  temporary="$(mktemp -d)"
+  archive="${temporary}/${archive_name}"
+  trap 'rm -rf -- "${temporary:-}"' RETURN
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl openssl tar
+  curl -4 -fL --retry 5 --retry-delay 5 --connect-timeout 30 \
+    "${SMM_RELEASE_BASE_URL}/${archive_name}" -o "$archive"
+  curl -4 -fL --retry 5 --retry-delay 5 --connect-timeout 30 \
+    "${SMM_RELEASE_BASE_URL}/${archive_name}.sha256" -o "${archive}.sha256"
+  checksum="$(awk 'NR == 1 { print $1 }' "${archive}.sha256")"
+  [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]] || die "Некорректный release checksum"
+  [[ "$(sha256sum "$archive" | awk '{ print $1 }')" == "$checksum" ]] \
+    || die "Checksum control layer не совпал"
+  tar -xzf "$archive" -C "$temporary"
+  [[ -x "${temporary}/agent/ochenstarik-smm-agent" ]] || die "В release нет Agent"
+  [[ -x "${temporary}/control/ochenstarik-smm-control" ]] || die "В release нет Control"
+  install -d -m 0755 -o root -g root "$(dirname "$AGENT_BINARY")" "$(dirname "$CONTROL_BINARY")"
+  install -m 0755 -o root -g root "${temporary}/agent/ochenstarik-smm-agent" "$AGENT_BINARY"
+  install -m 0755 -o root -g root "${temporary}/control/ochenstarik-smm-control" "$CONTROL_BINARY"
+  trap - RETURN
+  rm -rf -- "$temporary"
+}
+
+ensure_system_user() {
+  local user="$1" home="$2"
+  if ! getent passwd "$user" >/dev/null; then
+    useradd --system --home-dir "$home" --create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -m 0700 -o "$user" -g "$user" "$home"
+}
+
+create_control_certificates() {
+  local endpoint="$1" san temporary
+  [[ -f "${CONTROL_STATE}/control-ca.pfx" && -f "${CONTROL_STATE}/server.pfx" && -f "$CONTROL_CA_CERT" ]] \
+    && return 0
+  temporary="$(mktemp -d)"
+  trap 'rm -rf -- "${temporary:-}"' RETURN
+  if [[ "$endpoint" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    san="IP:${endpoint}"
+  else
+    san="DNS:${endpoint}"
+  fi
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -sha256 -nodes \
+    -days 3650 -subj '/CN=Ochenstarik SMM Control CA' \
+    -keyout "${temporary}/ca.key" -out "${temporary}/ca.crt" >/dev/null 2>&1
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -sha256 -nodes \
+    -subj "/CN=${endpoint}" -addext "subjectAltName=${san}" \
+    -keyout "${temporary}/server.key" -out "${temporary}/server.csr" >/dev/null 2>&1
+  openssl x509 -req -sha256 -days 825 -in "${temporary}/server.csr" \
+    -CA "${temporary}/ca.crt" -CAkey "${temporary}/ca.key" -CAcreateserial \
+    -copy_extensions copy -out "${temporary}/server.crt" >/dev/null 2>&1
+  openssl pkcs12 -export -passout pass: -name smm-control-ca \
+    -inkey "${temporary}/ca.key" -in "${temporary}/ca.crt" \
+    -out "${temporary}/control-ca.pfx"
+  openssl pkcs12 -export -passout pass: -name smm-control \
+    -inkey "${temporary}/server.key" -in "${temporary}/server.crt" \
+    -certfile "${temporary}/ca.crt" -out "${temporary}/server.pfx"
+  install -m 0600 -o "$CONTROL_USER" -g "$CONTROL_USER" \
+    "${temporary}/control-ca.pfx" "${CONTROL_STATE}/control-ca.pfx"
+  install -m 0600 -o "$CONTROL_USER" -g "$CONTROL_USER" \
+    "${temporary}/server.pfx" "${CONTROL_STATE}/server.pfx"
+  install -m 0644 -o root -g root "${temporary}/ca.crt" "$CONTROL_CA_CERT"
+  trap - RETURN
+  rm -rf -- "$temporary"
+}
+
+configure_control_service() {
+  cat > "$CONTROL_ENV" <<EOF
+ASPNETCORE_URLS=https://0.0.0.0:${CONTROL_PORT}
+ASPNETCORE_Kestrel__Certificates__Default__Path=${CONTROL_STATE}/server.pfx
+Control__DatabasePath=${CONTROL_STATE}/control.db
+Control__CertificateAuthorityPath=${CONTROL_STATE}/control-ca.pfx
+Control__HeartbeatSeconds=30
+EOF
+  chmod 0600 "$CONTROL_ENV"
+  cat > "$CONTROL_SERVICE" <<EOF
+[Unit]
+Description=Ochenstarik Server Monitor Manager Control Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${CONTROL_USER}
+Group=${CONTROL_USER}
+EnvironmentFile=${CONTROL_ENV}
+ExecStart=${CONTROL_BINARY}
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=${CONTROL_STATE}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "$CONTROL_SERVICE"
+  systemctl daemon-reload
+  systemctl enable --now ochenstarik-smm-control.service
+}
+
+install_control_hub() {
+  local endpoint
+  [[ -r "$HUB_CONFIG" ]] || die "Сначала установите роль Hub"
+  endpoint="$(awk -F= '$1 == "HUB_ENDPOINT" { print $2; exit }' "$HUB_CONFIG")"
+  [[ -n "$endpoint" ]] || die "В hub.conf отсутствует HUB_ENDPOINT"
+  download_control_layer
+  ensure_system_user "$CONTROL_USER" "$CONTROL_STATE"
+  install -d -m 0700 -o root -g root "$MESH_DIR"
+  create_control_certificates "$endpoint"
+  configure_control_service
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+    ufw allow "${CONTROL_PORT}/tcp" comment 'Server Monitor Control' >/dev/null
+  fi
+  log "Control Hub установлен: https://${endpoint}:${CONTROL_PORT}"
+  log "Создать код Agent: sudo $0 control-code ИМЯ"
+}
+
 install_hub() {
   install_monitoring
   install_mesh_dependencies
@@ -719,6 +991,7 @@ EOF
   log "Главный Mesh Hub установлен: ${HUB_ENDPOINT_VALUE}:${WG_PORT_VALUE}/udp"
   log "Создать код узла: sudo ochenstarik-smm node-code ai-agent"
   log "Включить SSH на 2 часа: sudo ochenstarik-smm link-connect ai-agent home tcp 22 120"
+  log "Установить постоянный control layer: sudo $0 install-control-hub"
 }
 
 base64url_encode() {
@@ -838,6 +1111,7 @@ install_node() {
   install_monitoring
   install_node_mesh
   log "Вторичный сервер установлен"
+  log "После установки Control Hub добавьте Agent: sudo $0 install-control-agent"
 }
 
 show_status() {
@@ -860,6 +1134,8 @@ show_status() {
   else
     warn "Серверная часть ещё не установлена"
   fi
+  printf 'Control Hub: %s\n' "$(systemctl is-active ochenstarik-smm-control.service 2>/dev/null || true)"
+  printf 'Control Agent: %s\n' "$(systemctl is-active ochenstarik-smm-agent.service 2>/dev/null || true)"
 }
 
 install_server_part() {
@@ -890,7 +1166,9 @@ backup_state() {
     /etc/systemd/system/ochenstarik-smm-firewall.service \
     /etc/systemd/system/ochenstarik-smm-firewall.timer \
     /etc/sudoers.d/ochenstarik-smm-hub \
-    /etc/sysctl.d/90-ochenstarik-smm-forward.conf; do
+    /etc/sysctl.d/90-ochenstarik-smm-forward.conf \
+    "$CONTROL_SERVICE" "$AGENT_SERVICE" "$CONTROL_BINARY" "$AGENT_BINARY" \
+    "$CONTROL_STATE" "$AGENT_STATE" "$CONTROL_ENV" "$AGENT_ENV" "$CONTROL_CA_CERT"; do
     [[ -e "$path" || -L "$path" ]] && paths+=("${path#/}")
   done
   ((${#paths[@]} > 0)) || { warn "Нет установленных файлов для backup"; return 0; }
@@ -960,11 +1238,15 @@ uninstall_node() {
   confirm_action "Отключить и удалить WireGuard Node" || { log "Отменено"; return 0; }
   backup_state
   systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
+  systemctl disable --now ochenstarik-smm-agent.service 2>/dev/null || true
   ssh_port="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')"
   if command -v ufw >/dev/null 2>&1 && [[ -n "$ssh_port" ]]; then
     ufw --force delete allow in on "$WG_INTERFACE" to any port "$ssh_port" proto tcp >/dev/null 2>&1 || true
   fi
-  rm -f -- "$WG_CONFIG" "$MESH_DIR/node.conf"
+  rm -f -- "$WG_CONFIG" "$MESH_DIR/node.conf" "$AGENT_SERVICE" "$AGENT_ENV"
+  rm -rf -- "$AGENT_STATE" "$(dirname "$AGENT_BINARY")"
+  getent passwd "$AGENT_USER" >/dev/null && userdel "$AGENT_USER" 2>/dev/null || true
+  systemctl daemon-reload
   rmdir "$MESH_DIR" 2>/dev/null || true
   log "WireGuard Node удалён; monitoring identity оставлена"
 }
@@ -976,6 +1258,7 @@ uninstall_hub() {
   backup_state
   wg_port="$(awk -F= '$1 == "WG_PORT" { print $2; exit }' "$HUB_CONFIG")"
   systemctl disable --now ochenstarik-smm-firewall.timer ochenstarik-smm-firewall.service 2>/dev/null || true
+  systemctl disable --now ochenstarik-smm-control.service 2>/dev/null || true
   systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
   nft delete table inet ochenstarik_smm >/dev/null 2>&1 || true
   if command -v ufw >/dev/null 2>&1; then
@@ -987,7 +1270,9 @@ uninstall_hub() {
     /etc/systemd/system/ochenstarik-smm-firewall.timer \
     /etc/sudoers.d/ochenstarik-smm-hub \
     /etc/sysctl.d/90-ochenstarik-smm-forward.conf \
-    "$HUB_HELPER" "$HUB_CLI" "$WG_CONFIG"
+    "$HUB_HELPER" "$HUB_CLI" "$WG_CONFIG" "$CONTROL_SERVICE" "$CONTROL_ENV" "$CONTROL_CA_CERT"
+  rm -rf -- "$CONTROL_STATE" "$(dirname "$CONTROL_BINARY")"
+  getent passwd "$CONTROL_USER" >/dev/null && userdel "$CONTROL_USER" 2>/dev/null || true
   rm -rf -- "$MESH_DIR"
   systemctl daemon-reload
   sysctl --system >/dev/null
@@ -1002,6 +1287,9 @@ main() {
     install|install-monitor) install_server_part ;;
     hub|install-hub) install_hub ;;
     node|install-node) install_node ;;
+    install-control-hub) install_control_hub ;;
+    install-control-agent) install_control_agent ;;
+    control-code) [[ $# -eq 2 ]] || die "Использование: $0 control-code NAME"; create_control_join_code "$2" ;;
     hub-code) [[ $# -eq 2 ]] || die "Использование: $0 hub-code NAME"; exec "$HUB_HELPER" node-code "$2" ;;
     status) show_status ;;
     update) update_installed ;;
@@ -1010,7 +1298,7 @@ main() {
     uninstall-node) uninstall_node ;;
     uninstall-hub) uninstall_hub ;;
     uninstall) die "Укажите роль: uninstall-monitor, uninstall-node или uninstall-hub" ;;
-    *) die "Использование: $0 {install-monitor|install-hub|install-node|hub-code NAME|status|update|rollback|uninstall-monitor|uninstall-node|uninstall-hub}" ;;
+    *) die "Использование: $0 {install-monitor|install-hub|install-node|install-control-hub|install-control-agent|control-code NAME|hub-code NAME|status|update|rollback|uninstall-monitor|uninstall-node|uninstall-hub}" ;;
   esac
 }
 
