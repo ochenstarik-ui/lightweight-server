@@ -32,7 +32,7 @@ chmod 700 ./*.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then opens the main menu with steps 1–8. Select any step, run it, and the wizard returns to the main menu.
+The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then opens the main menu with steps 1–8 plus the uninstall/reset option. Select any item, run it, and the wizard returns to the main menu.
 
 Keep the current SSH session open while changing the SSH port. Test the new login in a second terminal before disconnecting.
 
@@ -51,7 +51,7 @@ The wizard intentionally requires all module scripts to be present locally. Use 
 | `ochenstarik-server-panel-warp-6.sh` | 3x-ui panel and local Cloudflare WARP proxy | Optional |
 | `ochenstarik-server-backup-7.sh` | Protected initial snapshot and selected daily, weekly, or monthly schedules | Optional |
 | `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
-| `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
+| `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Available from the wizard; use carefully |
 
 Every module can be run independently from the full archive or cloned repository:
 
@@ -152,3 +152,7 @@ sudo ./ochenstarik-server-uninstall.sh
 ```
 
 Read every confirmation carefully. The reset script preserves critical Ubuntu packages and avoids removing access until explicitly confirmed.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

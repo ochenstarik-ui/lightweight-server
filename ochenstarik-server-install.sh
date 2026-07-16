@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly UNINSTALL_FILE="ochenstarik-server-uninstall.sh"
 
 declare -a STEP_FILES=(
   "ochenstarik-server-1.sh"
@@ -27,6 +28,7 @@ declare -a STEP_TITLES=(
 
 TEMP_FILE=""
 UI_LANG=en
+UNINSTALL_TITLE="Complete reset / uninstall project-managed settings"
 declare -A MASTER_TEXT=()
 
 load_master_text() {
@@ -37,6 +39,7 @@ load_master_text() {
     [main_menu]="Main menu"
     [select_step]="Enter a step number to install it, or 0 to exit: "
     [exit]="Exit"
+    [uninstall]="Uninstall / reset server settings"
     [install]="Install / run this step"
     [skip]="Skip and continue to the next step"
     [finish]="Exit the installer"
@@ -61,6 +64,7 @@ load_master_text() {
       [intro_body]="Выберите любой этап установки в главном меню. После завершения этапа мастер вернётся обратно в это меню. Не закрывайте текущую SSH-сессию при изменении порта и проверьте новый вход во втором терминале."
       [step]="Этап %s из %s: %s" [install]="Установить / запустить этот этап"
       [main_menu]="Главное меню" [select_step]="Введите номер этапа для установки или 0 для выхода: " [exit]="Выход"
+      [uninstall]="Удаление / сброс настроек сервера"
       [skip]="Пропустить и перейти к следующему" [finish]="Завершить мастер"
       [action]="Выберите действие: " [invalid]="Введите 1, 2 или 3" [interrupted]="Ввод прерван"
       [failed]="Этап завершился с ошибкой." [retry]="Запустить этот этап повторно"
@@ -160,8 +164,20 @@ master_msg() {
 }
 
 localize_step_titles() {
+  STEP_TITLES=(
+    "Timezone, terminal language, programs, and swap"
+    "Base packages, SSH port, IPv4/IPv6, and UFW"
+    "Administrator, SSH migration, and fail2ban"
+    "Telegram notifications for SSH logins"
+    "System VPN through Xray"
+    "3x-ui panel and Cloudflare WARP"
+    "Initial snapshot and backup schedules"
+    "Optional AI agents for a regular user"
+  )
+  UNINSTALL_TITLE="Complete reset / uninstall project-managed settings"
+
   case "$UI_LANG" in
-    ru) STEP_TITLES=("Часовой пояс, язык терминала, программы и swap" "Базовые пакеты, SSH-порт, IPv4/IPv6 и UFW" "Администратор, перенос SSH и fail2ban" "Telegram-уведомления о входах по SSH" "Системный VPN через Xray" "Панель 3x-ui и Cloudflare WARP" "Первичный снимок и расписания бэкапов" "AI-агенты на выбор для обычного пользователя") ;;
+    ru) STEP_TITLES=("Часовой пояс, язык терминала, программы и swap" "Базовые пакеты, SSH-порт, IPv4/IPv6 и UFW" "Администратор, перенос SSH и fail2ban" "Telegram-уведомления о входах по SSH" "Системный VPN через Xray" "Панель 3x-ui и Cloudflare WARP" "Первичный снимок и расписания бэкапов" "AI-агенты на выбор для обычного пользователя"); UNINSTALL_TITLE="Полное удаление / сброс настроек сервера" ;;
     es) STEP_TITLES=("Zona horaria, idioma del terminal, programas y swap" "Paquetes base, puerto SSH, IPv4/IPv6 y UFW" "Administrador, migración SSH y fail2ban" "Notificaciones de Telegram para accesos SSH" "VPN del sistema mediante Xray" "Panel 3x-ui y Cloudflare WARP" "Instantánea inicial y copias programadas" "Agentes de IA opcionales para un usuario normal") ;;
     de) STEP_TITLES=("Zeitzone, Terminalsprache, Programme und Swap" "Basispakete, SSH-Port, IPv4/IPv6 und UFW" "Administrator, SSH-Umstellung und fail2ban" "Telegram-Benachrichtigungen für SSH-Anmeldungen" "System-VPN über Xray" "3x-ui und Cloudflare WARP" "Erstsicherung und Sicherungspläne" "Optionale KI-Agenten für einen normalen Benutzer") ;;
     fr) STEP_TITLES=("Fuseau horaire, langue du terminal, programmes et swap" "Paquets de base, port SSH, IPv4/IPv6 et UFW" "Administrateur, migration SSH et fail2ban" "Notifications Telegram des connexions SSH" "VPN système via Xray" "Panneau 3x-ui et Cloudflare WARP" "Instantané initial et sauvegardes planifiées" "Agents IA facultatifs pour un utilisateur standard") ;;
@@ -227,6 +243,7 @@ choose_main_menu_action() {
     for index in "${!STEP_FILES[@]}"; do
       printf '  %s) %s\n' "$((index + 1))" "${STEP_TITLES[index]}"
     done
+    printf '  %s) %s\n' "$(( ${#STEP_FILES[@]} + 1 ))" "$UNINSTALL_TITLE"
     printf '  0) %s\n' "$(master_msg exit)"
     read -rp "$(master_msg select_step)" answer || die "$(master_msg interrupted)"
     answer="${answer:-}"
@@ -234,11 +251,11 @@ choose_main_menu_action() {
       printf -v "$result_variable" '%s' 0
       return 0
     fi
-    if [[ "$answer" =~ ^[0-9]+$ ]] && ((10#$answer >= 1 && 10#$answer <= ${#STEP_FILES[@]})); then
+    if [[ "$answer" =~ ^[0-9]+$ ]] && ((10#$answer >= 1 && 10#$answer <= ${#STEP_FILES[@]} + 1)); then
       printf -v "$result_variable" '%s' "$((10#$answer))"
       return 0
     fi
-    warn "Введите число от 0 до ${#STEP_FILES[@]}"
+    warn "Введите число от 0 до $(( ${#STEP_FILES[@]} + 1 ))"
   done
 }
 
@@ -301,11 +318,17 @@ while :; do
     exit 0
   fi
   step_number="$menu_action"
-  index="$((step_number - 1))"
   script_path=""
-  ensure_step_script "${STEP_FILES[index]}" script_path
+  if ((step_number == ${#STEP_FILES[@]} + 1)); then
+    ensure_step_script "$UNINSTALL_FILE" script_path
+    title="$UNINSTALL_TITLE"
+  else
+    index="$((step_number - 1))"
+    ensure_step_script "${STEP_FILES[index]}" script_path
+    title="${STEP_TITLES[index]}"
+  fi
   while :; do
-    log "$(master_msg launch "$step_number" "${STEP_TITLES[index]}")"
+    log "$(master_msg launch "$step_number" "$title")"
     if bash -- "$script_path"; then
       completed="$((completed + 1))"
       log "$(master_msg success "$step_number")"
