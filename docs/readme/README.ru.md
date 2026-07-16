@@ -98,6 +98,16 @@ sudo ochenstarik-smm links
 
 Установщик Node создаст приватный WireGuard-ключ локально и покажет запрос `SMMREQ1`. Во втором терминале выполните на Hub `sudo ochenstarik-smm node-enroll`, вставьте запрос по скрытому приглашению и верните полученный код `SMMACK1` в установщик Node. Enrollment-код действует 10 минут и погашается при первой успешной регистрации.
 
+Команды обслуживания учитывают установленную роль и создают root-only backup перед изменениями:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh update
+sudo ./ochenstarik-server-monitor-manager.sh rollback
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-node
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-hub
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-monitor
+```
+
 ## Требования
 
 - Ubuntu Server или совместимая Debian-система с `systemd`;

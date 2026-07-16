@@ -111,6 +111,16 @@ sudo ochenstarik-smm links
 
 The Node installer creates its private WireGuard key locally and prints an `SMMREQ1` request. In a second terminal run `sudo ochenstarik-smm node-enroll` on the Hub, paste the request at the hidden prompt, and return the resulting `SMMACK1` code to the Node installer. The enrollment code expires after 10 minutes and is consumed by the first successful registration.
 
+Role-aware maintenance commands create a root-only backup before destructive changes:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh update
+sudo ./ochenstarik-server-monitor-manager.sh rollback
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-node
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-hub
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-monitor
+```
+
 ## Installation flow
 
 1. Select the wizard dialog language.

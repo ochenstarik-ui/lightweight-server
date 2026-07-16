@@ -49,3 +49,6 @@ jobs:
 
       - name: Test Server Monitor Manager Link policies
         run: bash tests/test-monitor-manager-links.sh
+
+      - name: Test Server Monitor Manager lifecycle
+        run: bash tests/test-monitor-manager-lifecycle.sh

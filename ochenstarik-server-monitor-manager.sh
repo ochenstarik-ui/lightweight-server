@@ -59,14 +59,14 @@ read_public_key() {
 install_monitor_dependencies() {
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ca-certificates openssh-server openssh-client coreutils gawk
+    ca-certificates openssh-server openssh-client coreutils gawk sudo
   systemctl enable --now ssh
 }
 
 install_mesh_dependencies() {
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    wireguard-tools nftables iproute2 jq openssl
+    wireguard-tools nftables iproute2 iputils-ping jq openssl
 }
 
 verify_public_key() {
@@ -857,14 +857,84 @@ install_server_part() {
   show_status
 }
 
-uninstall_server_part() {
-  local answer
+confirm_action() {
+  local prompt="$1" answer
   if [[ -r /dev/tty ]]; then
-    IFS= read -r -p 'Удалить пользователя мониторинга и forced-command? [y/N]: ' answer < /dev/tty
+    IFS= read -r -p "$prompt [y/N]: " answer < /dev/tty
   else
-    die "Для удаления требуется интерактивный терминал"
+    die "Для этой операции требуется интерактивный терминал"
   fi
-  [[ "$answer" =~ ^[Yy]$ ]] || { log "Отменено"; return 0; }
+  [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+backup_state() {
+  local backup_dir="/var/backups/${APP_NAME}" backup_file timestamp path
+  local -a paths=()
+  install -d -m 0700 -o root -g root "$backup_dir"
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup_file="${backup_dir}/${timestamp}.tar.gz"
+  for path in \
+    "$MESH_DIR" "$MONITOR_HOME" "$MONITOR_COMMAND" "$HUB_HELPER" "$HUB_CLI" "$WG_CONFIG" \
+    /etc/systemd/system/ochenstarik-smm-firewall.service \
+    /etc/systemd/system/ochenstarik-smm-firewall.timer \
+    /etc/sudoers.d/ochenstarik-smm-hub \
+    /etc/sysctl.d/90-ochenstarik-smm-forward.conf; do
+    [[ -e "$path" || -L "$path" ]] && paths+=("${path#/}")
+  done
+  ((${#paths[@]} > 0)) || { warn "Нет установленных файлов для backup"; return 0; }
+  tar -C / -czf "$backup_file" -- "${paths[@]}"
+  chmod 0600 "$backup_file"
+  log "Backup: $backup_file"
+}
+
+rollback_state() {
+  local backup_dir="/var/backups/${APP_NAME}" latest
+  latest="$(find "$backup_dir" -maxdepth 1 -type f -name '*.tar.gz' -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr | awk 'NR == 1 { sub(/^[^ ]+ /, ""); print }')"
+  [[ -n "$latest" && -f "$latest" ]] || die "Backup для rollback не найден"
+  confirm_action "Восстановить $latest" || { log "Отменено"; return 0; }
+  tar -C / -xzf "$latest"
+  systemctl daemon-reload
+  [[ ! -f "$WG_CONFIG" ]] || systemctl restart "wg-quick@${WG_INTERFACE}.service"
+  [[ ! -x "$HUB_HELPER" ]] || "$HUB_HELPER" firewall-restore
+  [[ ! -x "$MONITOR_COMMAND" ]] || systemctl reload ssh
+  log "Rollback завершён: $latest"
+}
+
+existing_public_key() {
+  [[ -r "$AUTHORIZED_KEYS" ]] || die "Не найден существующий SSH-ключ мониторинга"
+  sed -n 's/^.*\(ssh-ed25519 [A-Za-z0-9+\/=]*.*\)$/\1/p' "$AUTHORIZED_KEYS" | head -n 1
+}
+
+update_installed() {
+  local role=monitor
+  backup_state
+  SERVER_MONITOR_PUBLIC_KEY="$(existing_public_key)"
+  export SERVER_MONITOR_PUBLIC_KEY
+  if [[ -r "$HUB_CONFIG" ]]; then
+    role=hub
+    SMM_HUB_ENDPOINT="$(awk -F= '$1 == "HUB_ENDPOINT" { print $2; exit }' "$HUB_CONFIG")"
+    SMM_WG_PORT="$(awk -F= '$1 == "WG_PORT" { print $2; exit }' "$HUB_CONFIG")"
+    export SMM_HUB_ENDPOINT SMM_WG_PORT
+    install_hub
+  elif [[ -r "$MESH_DIR/node.conf" ]]; then
+    role=node
+    install_monitoring
+    install_mesh_dependencies
+    systemctl enable --now "wg-quick@${WG_INTERFACE}.service"
+    systemctl restart "wg-quick@${WG_INTERFACE}.service"
+  else
+    install_server_part
+  fi
+  unset SERVER_MONITOR_PUBLIC_KEY SMM_HUB_ENDPOINT SMM_WG_PORT
+  log "Обновление роли $role завершено"
+}
+
+uninstall_monitor() {
+  [[ ! -r "$HUB_CONFIG" && ! -r "$MESH_DIR/node.conf" ]] \
+    || die "Сначала удалите роль командой uninstall-hub или uninstall-node"
+  confirm_action "Удалить пользователя мониторинга и forced-command" || { log "Отменено"; return 0; }
+  backup_state
   rm -f -- "$MONITOR_COMMAND"
   if getent passwd "$MONITOR_USER" >/dev/null; then
     userdel --remove "$MONITOR_USER" 2>/dev/null || userdel "$MONITOR_USER"
@@ -872,18 +942,63 @@ uninstall_server_part() {
   log "Серверная часть мониторинга удалена"
 }
 
+uninstall_node() {
+  local ssh_port
+  [[ -r "$MESH_DIR/node.conf" ]] || die "Роль Node не установлена"
+  confirm_action "Отключить и удалить WireGuard Node" || { log "Отменено"; return 0; }
+  backup_state
+  systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
+  ssh_port="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')"
+  if command -v ufw >/dev/null 2>&1 && [[ -n "$ssh_port" ]]; then
+    ufw --force delete allow in on "$WG_INTERFACE" to any port "$ssh_port" proto tcp >/dev/null 2>&1 || true
+  fi
+  rm -f -- "$WG_CONFIG" "$MESH_DIR/node.conf"
+  rmdir "$MESH_DIR" 2>/dev/null || true
+  log "WireGuard Node удалён; monitoring identity оставлена"
+}
+
+uninstall_hub() {
+  local wg_port
+  [[ -r "$HUB_CONFIG" ]] || die "Роль Hub не установлена"
+  confirm_action "Удалить Hub, все Node identities, Links и аудит" || { log "Отменено"; return 0; }
+  backup_state
+  wg_port="$(awk -F= '$1 == "WG_PORT" { print $2; exit }' "$HUB_CONFIG")"
+  systemctl disable --now ochenstarik-smm-firewall.timer ochenstarik-smm-firewall.service 2>/dev/null || true
+  systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
+  nft delete table inet ochenstarik_smm >/dev/null 2>&1 || true
+  if command -v ufw >/dev/null 2>&1; then
+    ufw --force delete allow "$wg_port/udp" >/dev/null 2>&1 || true
+    ufw --force route delete allow in on "$WG_INTERFACE" out on "$WG_INTERFACE" >/dev/null 2>&1 || true
+  fi
+  rm -f -- \
+    /etc/systemd/system/ochenstarik-smm-firewall.service \
+    /etc/systemd/system/ochenstarik-smm-firewall.timer \
+    /etc/sudoers.d/ochenstarik-smm-hub \
+    /etc/sysctl.d/90-ochenstarik-smm-forward.conf \
+    "$HUB_HELPER" "$HUB_CLI" "$WG_CONFIG"
+  rm -rf -- "$MESH_DIR"
+  systemctl daemon-reload
+  sysctl --system >/dev/null
+  log "Mesh Hub удалён; monitoring identity оставлена"
+}
+
 main() {
   local action="${1:-install}"
   require_root
   detect_system
   case "$action" in
-    install) install_server_part ;;
-    hub) install_hub ;;
-    node) install_node ;;
+    install|install-monitor) install_server_part ;;
+    hub|install-hub) install_hub ;;
+    node|install-node) install_node ;;
     hub-code) [[ $# -eq 2 ]] || die "Использование: $0 hub-code NAME"; exec "$HUB_HELPER" node-code "$2" ;;
     status) show_status ;;
-    uninstall) uninstall_server_part ;;
-    *) die "Использование: $0 {install|hub|node|hub-code NAME|status|uninstall}" ;;
+    update) update_installed ;;
+    rollback) rollback_state ;;
+    uninstall-monitor) uninstall_monitor ;;
+    uninstall-node) uninstall_node ;;
+    uninstall-hub) uninstall_hub ;;
+    uninstall) die "Укажите роль: uninstall-monitor, uninstall-node или uninstall-hub" ;;
+    *) die "Использование: $0 {install-monitor|install-hub|install-node|hub-code NAME|status|update|rollback|uninstall-monitor|uninstall-node|uninstall-hub}" ;;
   esac
 }
 
