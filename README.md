@@ -152,3 +152,7 @@ sudo ./ochenstarik-server-uninstall.sh
 ```
 
 Read every confirmation carefully. The reset script preserves critical Ubuntu packages and avoids removing access until explicitly confirmed.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
