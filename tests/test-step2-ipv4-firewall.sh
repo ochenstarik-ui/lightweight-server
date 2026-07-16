@@ -41,4 +41,9 @@ if [[ "$ipv4_block" != *'delete_managed_ufw_rules'* ]]; then
   exit 1
 fi
 
+if [[ "$ipv4_block" == *'ufw reload'* ]]; then
+  printf '[x] IPv4 mode must not reload UFW before stale managed rules are deleted\n' >&2
+  exit 1
+fi
+
 printf '[+] Step 2 IPv4 firewall behavior looks correct\n'

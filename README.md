@@ -32,33 +32,17 @@ chmod 700 ./*.sh
 sudo ./ochenstarik-server-install.sh
 ```
 
-The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then presents steps 1–8 in order. Each step can be installed, skipped, or used to exit the wizard.
+The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then opens the main menu with steps 1–8. Select any step, run it, and the wizard returns to the main menu.
 
 Keep the current SSH session open while changing the SSH port. Test the new login in a second terminal before disconnecting.
 
-## Short wizard-only installation
-
-If `raw.githubusercontent.com` is reachable from the server:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y curl ca-certificates
-curl -4 -fLO \
-  --retry 5 \
-  --retry-delay 10 \
-  --connect-timeout 30 \
-  https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-install.sh
-chmod 700 ochenstarik-server-install.sh
-sudo ./ochenstarik-server-install.sh
-```
-
-The wizard downloads any missing module from the `main` branch and validates it with `bash -n` before execution.
+The wizard intentionally requires all module scripts to be present locally. Use the full archive or `git clone`; a single downloaded wizard file will not fetch missing modules from the mutable `main` branch.
 
 ## Modules
 
 | Script | Purpose | Standalone use |
 | --- | --- | --- |
-| `ochenstarik-server-install.sh` | Unified wizard with language selection and sequential module installation | Recommended |
+| `ochenstarik-server-install.sh` | Unified wizard with language selection and a main menu for all modules | Recommended |
 | `ochenstarik-server-1.sh` | Timezone, terminal locale, program groups, and a 2 GiB swap file | Yes |
 | `ochenstarik-server-2.sh` | Base packages, SSH port, IPv4/IPv6 mode, UFW, and port management | Yes |
 | `ochenstarik-server-user-3.sh` | Administrative user, SSH key permissions, SSH migration, sudo, and fail2ban | Run after step 2 |
@@ -69,10 +53,9 @@ The wizard downloads any missing module from the `main` branch and validates it 
 | `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
 | `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
 
-Every module can be downloaded and run independently:
+Every module can be run independently from the full archive or cloned repository:
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/SCRIPT_NAME.sh
 chmod 700 SCRIPT_NAME.sh
 bash -n SCRIPT_NAME.sh
 sudo ./SCRIPT_NAME.sh

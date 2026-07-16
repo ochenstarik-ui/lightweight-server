@@ -146,6 +146,35 @@ rotate_backups() {
   done
 }
 
+read_backup_config() {
+  local line key value
+  BACKUP_ROOT=""
+  [[ -f "$CONFIG_FILE" && ! -L "$CONFIG_FILE" ]] \
+    || die "Не найден безопасный файл настроек: $CONFIG_FILE"
+  [[ "$(stat -c %u "$CONFIG_FILE")" == 0 ]] \
+    || die "Файл настроек должен принадлежать root: $CONFIG_FILE"
+  [[ "$(stat -c %a "$CONFIG_FILE")" =~ ^[0-7]*[0-5][0-5]$ ]] \
+    || die "Файл настроек не должен быть доступен для записи группе или всем: $CONFIG_FILE"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line//$'\r'/}"
+    [[ -n "$line" && "$line" != \#* ]] || continue
+    [[ "$line" == *=* ]] || die "Некорректная строка в $CONFIG_FILE: $line"
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      BACKUP_ROOT)
+        [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] \
+          || die "Некорректный BACKUP_ROOT в $CONFIG_FILE"
+        BACKUP_ROOT="$value"
+        ;;
+      *)
+        die "Неизвестный ключ в $CONFIG_FILE: $key"
+        ;;
+    esac
+  done < "$CONFIG_FILE"
+}
+
 create_backup() {
   local backup_kind="$1" keep_count="$2" timestamp target_dir
   local archive temporary checksum checksum_temporary exclude_backup_root
@@ -226,12 +255,7 @@ create_backup() {
 }
 
 [[ "$EUID" -eq 0 ]] || die "Запустите команду от имени root"
-[[ -f "$CONFIG_FILE" && ! -L "$CONFIG_FILE" ]] \
-  || die "Не найден безопасный файл настроек: $CONFIG_FILE"
-[[ "$(stat -c %u "$CONFIG_FILE")" == 0 ]] \
-  || die "Файл настроек должен принадлежать root: $CONFIG_FILE"
-# shellcheck source=/dev/null
-source "$CONFIG_FILE"
+read_backup_config
 [[ "${BACKUP_ROOT:-}" == /* && "$BACKUP_ROOT" != / ]] \
   || die "Некорректный BACKUP_ROOT в $CONFIG_FILE"
 mkdir -p -m 700 -- "$BACKUP_ROOT"/{initial,daily,weekly,monthly}
@@ -363,7 +387,7 @@ done
 
 install -d -o root -g root -m 700 "$CONFIG_DIR" "$BACKUP_ROOT"
 [[ ! -L "$CONFIG_FILE" ]] || die "Отказ от записи через символическую ссылку: $CONFIG_FILE"
-printf 'BACKUP_ROOT=%q\n' "$BACKUP_ROOT" > "$CONFIG_FILE"
+printf 'BACKUP_ROOT=%s\n' "$BACKUP_ROOT" > "$CONFIG_FILE"
 chown root:root "$CONFIG_FILE"
 chmod 600 "$CONFIG_FILE"
 
