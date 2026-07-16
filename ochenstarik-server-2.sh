@@ -87,7 +87,7 @@ choose_ip_mode() {
   esac
 
   printf '\nВыберите семейства IP для входящих подключений:\n'
-  printf '  1) Только IPv4 — IPv6 отключается системно и в UFW\n'
+  printf '  1) Только IPv4 — входящие IPv6-порты закрываются через UFW\n'
   printf '  2) Только IPv6 — открытые входящие порты доступны лишь по IPv6\n'
   printf '  3) IPv4 + IPv6\n'
   while :; do
@@ -206,19 +206,6 @@ set_ufw_ipv6_setting() {
   fi
 }
 
-disable_ipv6_systemwide() {
-  cat > "$IPV6_SYSCTL_FILE" <<'EOF'
-# Managed by ochenstarik-server-2.sh
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-  chmod 644 "$IPV6_SYSCTL_FILE"
-  sysctl -p "$IPV6_SYSCTL_FILE" >/dev/null
-  [[ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || true)" == 1 ]] \
-    || die "Не удалось отключить IPv6"
-}
-
 enable_ipv6_systemwide() {
   local sysctl_path
   local -a sysctl_paths=(/proc/sys/net/ipv6/conf/*/disable_ipv6)
@@ -228,6 +215,11 @@ enable_ipv6_systemwide() {
     [[ -e "$sysctl_path" ]] || continue
     printf '0\n' > "$sysctl_path" || die "Не удалось включить IPv6 через $sysctl_path"
   done
+}
+
+restore_ipv6_stack_if_managed() {
+  [[ -e "$IPV6_SYSCTL_FILE" ]] || return 0
+  enable_ipv6_systemwide
 }
 
 check_session_safety() {
@@ -284,9 +276,10 @@ apply_ip_mode_and_firewall() {
 
   check_session_safety
   if [[ "$IP_MODE" == ipv4 ]]; then
+    restore_ipv6_stack_if_managed
+    set_ufw_ipv6_setting yes
+    ufw reload >/dev/null 2>&1 || true
     delete_managed_ufw_rules
-    set_ufw_ipv6_setting no
-    disable_ipv6_systemwide
   else
     enable_ipv6_systemwide
     [[ "$IP_MODE" != ipv6 ]] || verify_ipv6_connectivity
@@ -326,14 +319,9 @@ if [[ "$ACTION" == install ]]; then
   apt-get update
   apt-get upgrade -y
 
-  log "Устанавливаю серверные пакеты и средства обработки документов"
+  log "Устанавливаю обязательные пакеты SSH, брандмауэра и защиты"
   apt-get install -y \
-    sudo ufw fail2ban curl ca-certificates openssl openssh-server logrotate iproute2 \
-    poppler-utils qpdf ghostscript ocrmypdf \
-    tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus \
-    libreoffice pandoc antiword catdoc imagemagick libimage-exiftool-perl webp \
-    ffmpeg mediainfo p7zip-full unzip zip unrar jq yq csvkit sqlite3 \
-    python3-pip python3-venv mc
+    sudo ufw fail2ban curl ca-certificates openssl openssh-server logrotate iproute2
 
   for command_name in ip sed sysctl ufw; do
     require_command "$command_name"

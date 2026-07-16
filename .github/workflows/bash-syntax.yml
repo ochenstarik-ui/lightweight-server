@@ -1,0 +1,45 @@
+name: Bash syntax
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check every installer
+        run: |
+          set -e
+          while IFS= read -r -d '' script; do
+            echo "Checking ${script}"
+            bash -n "${script}"
+          done < <(find . -type f -name '*.sh' -print0)
+
+      - name: Test step 1 selections
+        run: bash tests/test-step1-selection.sh
+
+      - name: Test step 2 IPv4 firewall mode
+        run: bash tests/test-step2-ipv4-firewall.sh
+
+      - name: Test master language selection
+        run: bash tests/test-master-language.sh
+
+      - name: Test README languages and monitoring links
+        run: bash tests/test-readme-languages.sh
+
+      - name: Test step 3 SSH configuration parsing
+        run: bash tests/test-step3-sshd-parsing.sh
+
+      - name: Test step 5 repeated-run actions
+        run: bash tests/test-step5-actions.sh
+
+      - name: Test step 8 AI agent catalog
+        run: bash tests/test-step8-agent-catalog.sh

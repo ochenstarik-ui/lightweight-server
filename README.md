@@ -1,377 +1,202 @@
-# Быстрая настройка Ubuntu Server
+# Lightweight Ubuntu Server Setup
 
-Набор независимых Bash-скриптов для первоначальной настройки Ubuntu Server. Можно запустить только нужные модули или выполнить их по порядку для полной настройки.
+**English** | [Русский](docs/readme/README.ru.md) | [Español](docs/readme/README.es.md) | [Deutsch](docs/readme/README.de.md) | [Français](docs/readme/README.fr.md) | [Português](docs/readme/README.pt.md) | [中文](docs/readme/README.zh-CN.md) | [日本語](docs/readme/README.ja.md) | [العربية](docs/readme/README.ar.md) | [हिन्दी](docs/readme/README.hi.md)
 
-## Что входит в проект
+A modular set of Bash installers for the initial setup, security hardening, administration, VPN, web panel, WARP, and backups on Ubuntu Server. Run the unified wizard for a guided installation or execute only the modules you need.
 
-| Файл | Назначение | Можно запускать отдельно |
-| --- | --- | --- |
-| `ochenstarik-server-1.sh` | Предлагает выбрать часовой пояс, создаёт swap-файл 2 ГБ и задаёт `vm.swappiness=20` | Да |
-| `ochenstarik-server-2.sh` | Предлагает выбрать будущий SSH-порт и режим IPv4/IPv6, обновляет систему, ставит пакеты и настраивает UFW | Да |
-| `ochenstarik-server-user-3.sh` | Создаёт администратора, переносит SSH на порт из этапа 2, проверяет права и включает fail2ban | После установки необходимых пакетов; проще всего сначала запустить скрипт 2 |
-| `ochenstarik-server-tg-4.sh` | Отправляет уведомления в Telegram при успешном входе по SSH | После установки OpenSSH и `curl`; обычно после скрипта 2 или 3 |
-| `ochenstarik-server-vpn-5.sh` | Устанавливает Xray и направляет системный трафик через VLESS + REALITY | Да; зависимости устанавливаются автоматически |
-| `ochenstarik-server-panel-warp-6.sh` | Устанавливает 3x-ui и Cloudflare WARP, настраивает и проверяет их порты | Ubuntu 22.04/24.04/26.04 или Debian 12/13 |
-| `ochenstarik-server-backup-7.sh` | Создаёт неизменяемый первичный снимок и настраивает выбранные расписания резервного копирования | Да; зависимости устанавливаются автоматически |
-| `ochenstarik-server-monitor-manager.sh` | Устанавливает главный WireGuard Hub или подключаемый узел Server Monitor Manager | Да; Hub нужен белый IP, вторичному узлу — только исходящий доступ |
+> **Manage multiple servers:** use the companion [Server Monitor Manager](https://github.com/ochenstarik-ui/server-monitor-manager) project to add servers, collect reports, and manage several hosts from one application. It is currently in early development and should not yet be treated as production-ready.
 
-Файлы `*.env.example` являются только примерами. Не записывайте настоящие пароли, токены и приватные SSH-ключи в Git.
+## Quick installation
 
-## Требования
-
-- Ubuntu Server или совместимая Debian-система с `systemd`;
-- доступ `root` или пользователь с `sudo`;
-- подключение к интернету;
-- рекомендуется сохранить текущую SSH-сессию открытой до проверки нового входа.
-
-## Получение проекта
-
-Рекомендуемый способ — загрузка архива через `codeload.github.com`. Он подходит в том числе для серверов, на которых соединение с основным доменом `github.com` завершается ошибкой `SSL connection timeout`:
+Copy the complete block into the server terminal. It downloads the repository archive through `codeload.github.com`, stops on errors, and starts the unified installer:
 
 ```bash
 set -e
 cd "$HOME"
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates tar
+archive="$(mktemp)"
+trap 'rm -f "$archive"' EXIT
 curl -4 -fL \
   --retry 5 \
   --retry-delay 10 \
   --connect-timeout 30 \
   https://codeload.github.com/ochenstarik-ui/lightweight-server/tar.gz/refs/heads/main \
-  -o lightweight-server.tar.gz
-mkdir lightweight-server
-tar -xzf lightweight-server.tar.gz -C lightweight-server --strip-components=1
-rm lightweight-server.tar.gz
+  -o "$archive"
+install -d -m 700 lightweight-server
+tar -xzf "$archive" -C lightweight-server --strip-components=1
+rm -f "$archive"
+trap - EXIT
 cd lightweight-server
 chmod 700 ./*.sh
+sudo ./ochenstarik-server-install.sh
 ```
 
-Если `github.com` доступен с сервера, проект также можно получить через Git:
+The first wizard prompt selects the dialog language. English is the default; Russian, Spanish, German, French, Portuguese, Simplified Chinese, Japanese, Arabic, and Hindi are also available. The wizard then presents steps 1–8 in order. Each step can be installed, skipped, or used to exit the wizard.
+
+Keep the current SSH session open while changing the SSH port. Test the new login in a second terminal before disconnecting.
+
+## Short wizard-only installation
+
+If `raw.githubusercontent.com` is reachable from the server:
 
 ```bash
-set -e
-cd "$HOME"
 sudo apt-get update
-sudo apt-get install -y git ca-certificates
-git -c http.version=HTTP/1.1 clone --depth 1 https://github.com/ochenstarik-ui/lightweight-server.git
-cd lightweight-server
-chmod 700 ./*.sh
+sudo apt-get install -y curl ca-certificates
+curl -4 -fLO \
+  --retry 5 \
+  --retry-delay 10 \
+  --connect-timeout 30 \
+  https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-install.sh
+chmod 700 ochenstarik-server-install.sh
+sudo ./ochenstarik-server-install.sh
 ```
 
-Команда `set -e` останавливает последовательность при ошибке загрузки, поэтому команды `cd` и `chmod` не будут выполняться для отсутствующей папки.
+The wizard downloads any missing module from the `main` branch and validates it with `bash -n` before execution.
 
-Перед запуском любого выбранного файла можно проверить его синтаксис:
+## Modules
+
+| Script | Purpose | Standalone use |
+| --- | --- | --- |
+| `ochenstarik-server-install.sh` | Unified wizard with language selection and sequential module installation | Recommended |
+| `ochenstarik-server-1.sh` | Timezone, terminal locale, program groups, and a 2 GiB swap file | Yes |
+| `ochenstarik-server-2.sh` | Base packages, SSH port, IPv4/IPv6 mode, UFW, and port management | Yes |
+| `ochenstarik-server-user-3.sh` | Administrative user, SSH key permissions, SSH migration, sudo, and fail2ban | Run after step 2 |
+| `ochenstarik-server-tg-4.sh` | Telegram notifications for successful SSH logins | Optional |
+| `ochenstarik-server-vpn-5.sh` | System VPN through Xray; repeated runs can connect, disconnect, reconfigure, or show status | Optional |
+| `ochenstarik-server-panel-warp-6.sh` | 3x-ui panel and local Cloudflare WARP proxy | Optional |
+| `ochenstarik-server-backup-7.sh` | Protected initial snapshot and selected daily, weekly, or monthly schedules | Optional |
+| `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
+| `ochenstarik-server-monitor-manager.sh` | Installs the Server Monitor Manager SSH endpoint, public WireGuard Hub, or outbound-only Node | Optional; Hub needs a public UDP endpoint |
+| `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
+
+Every module can be downloaded and run independently:
 
 ```bash
-bash -n ./ИМЯ-СКРИПТА.sh
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/SCRIPT_NAME.sh
+chmod 700 SCRIPT_NAME.sh
+bash -n SCRIPT_NAME.sh
+sudo ./SCRIPT_NAME.sh
 ```
 
-## Server Monitor Manager: своя сеть без Tailscale
+Replace `SCRIPT_NAME.sh` with the required filename from the table.
 
-Файл `ochenstarik-server-monitor-manager.sh` устанавливает лёгкую сеть WireGuard со звездной топологией. Главный сервер с белым IP становится Hub, а домашний и другие серверы подключаются к нему исходящими соединениями. Белый IP на вторичных узлах не нужен.
+## Server Monitor Manager Hub and Nodes
 
-На главном сервере откройте входящий UDP-порт WireGuard (по умолчанию `51820`) в панели хостинга и запустите:
+The Hub needs a public IPv4 address or domain and an open UDP port (default `51820`). Secondary Nodes establish outbound WireGuard connections and do not need a public IP.
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/agent/server-monitor-installer/ochenstarik-server-monitor-manager.sh
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-monitor-manager.sh
 chmod 700 ochenstarik-server-monitor-manager.sh
 bash -n ochenstarik-server-monitor-manager.sh
 sudo ./ochenstarik-server-monitor-manager.sh hub
 ```
 
-После установки создайте отдельный секретный код конфигурации для каждого узла:
+Create a separate configuration code for each Node on the Hub, then run the same installer with `node` on the matching server:
 
 ```bash
 sudo ochenstarik-smm node-code ai-agent
 sudo ochenstarik-smm node-code home
-sudo ochenstarik-smm node-code server2
-```
-
-На соответствующем вторичном сервере скачайте тот же файл и выполните:
-
-```bash
 sudo ./ochenstarik-server-monitor-manager.sh node
 ```
 
-Установщик попросит публичный SSH-ключ приложения и код, созданный для этого узла. Код содержит приватный ключ WireGuard узла: передавайте его только в защищённый терминал, используйте для одного сервера и создайте новый узел, если код стал известен посторонним.
-
-Связи направленные и управляются на Hub. Например, разрешить AI-агенту доступ к домашнему серверу и ко второму серверу, а затем отключить только второй маршрут:
+Links are directional. The reverse direction requires its own rule:
 
 ```bash
 sudo ochenstarik-smm link-connect ai-agent home
-sudo ochenstarik-smm link-connect ai-agent server2
-sudo ochenstarik-smm link-disconnect ai-agent server2
-```
-
-Проверка состояния:
-
-```bash
+sudo ochenstarik-smm link-disconnect ai-agent home
 sudo ochenstarik-smm nodes
 sudo ochenstarik-smm links
-sudo ochenstarik-smm status
 ```
 
-Hub маршрутизирует только явно разрешённые пары `источник → цель`; обратное направление включается отдельно. Вторичные серверы не соединяются друг с другом напрямую и не требуют Tailscale или другого внешнего сервиса.
+The current configuration code contains the Node private WireGuard key and is intended only for early testing. Do not store it in Git or messages. Local Node key generation and expiring one-time enrollment are tracked before production use.
 
-## 1. Часовой пояс и настройка swap
+## Installation flow
 
-Файл: `ochenstarik-server-1.sh`.
+1. Select the wizard dialog language.
+2. Configure the timezone, terminal locale, recommended tools, and swap.
+3. Select IPv4, IPv6, or dual-stack operation; install base services and select the future SSH port.
+4. Create or update the administrative user, install the public SSH key, repair ownership and permissions, and move SSH to the port selected in step 2.
+5. Optionally configure Telegram SSH-login notifications.
+6. Optionally configure the system VPN and subscription port.
+7. Optionally deploy 3x-ui and Cloudflare WARP with selected panel and subscription ports.
+8. Optionally create the permanent initial backup and configure rotating schedules.
+9. Optionally install one or more AI agents for the administrative user.
 
-Сначала показывает нумерованное меню популярных часовых поясов, включая `Asia/Novosibirsk`, `Europe/Moscow` и `UTC`. Нужную зону достаточно выбрать по номеру. Для остальных зон предусмотрен полный список с последовательным выбором региона и часового пояса — вводить имя вручную не требуется. Затем скрипт создаёт `/swapfile` размером 2 ГБ, добавляет его в `/etc/fstab` и устанавливает `vm.swappiness=20`. Повторный запуск предусмотрен.
+## VPN connection control
+
+After the first successful setup, running `ochenstarik-server-vpn-5.sh` again opens an action menu: connect using saved settings, disconnect while keeping the configuration, replace the subscription, or show status. The same actions are available directly:
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-1.sh
-chmod 700 ochenstarik-server-1.sh
-bash -n ochenstarik-server-1.sh
-sudo ./ochenstarik-server-1.sh
-```
-
-Проверка:
-
-```bash
-swapon --show
-sysctl vm.swappiness
-```
-
-## 2. Базовые пакеты, SSH-порт и брандмауэр
-
-Файл: `ochenstarik-server-2.sh`.
-
-При каждом запуске скрипт предлагает три действия: полную установку или обновление, изменение режима IP без переустановки пакетов либо добавление открытых портов. При полной установке он запрашивает SSH-порт для этапа 3, обновляет систему и устанавливает OpenSSH, UFW, fail2ban, инструменты обработки документов, изображений, аудио и видео.
-
-Для входящих подключений можно выбрать:
-
-- только IPv4 — IPv6 отключается в UFW и системно через `sysctl`; этот режим рекомендуется, если 3x-ui используется только по IPv4;
-- только IPv6 — управляемые скриптом порты открываются лишь для IPv6;
-- IPv4 + IPv6 — порты открываются для обоих семейств.
-
-Выбор сохраняется в `/etc/ochenstarik-server/ip-family.conf`, а список управляемых портов — в `/etc/ochenstarik-server/ufw-managed-ports.conf`. При переходе на режим с одним семейством старые правила этих портов пересоздаются. Скрипт не разрешит отключить семейство адресов, через которое работает текущая SSH-сессия. Для режима IPv6 также проверяются глобальный IPv6-адрес и маршрут по умолчанию.
-
-В режиме «только IPv6» системный IPv4 остаётся доступен для исходящих соединений и работы менеджера пакетов, но входящие управляемые порты по IPv4 закрываются UFW. Полное переносимое отключение IPv4 в Linux без привязки к конкретной сетевой конфигурации не выполняется.
-
-Открываются TCP-порты:
-
-- `22` — временный SSH-порт;
-- выбранный SSH-порт — будущий порт SSH;
-- `80`, `443` — HTTP и HTTPS;
-- `2096`, `40000`, `63636` — порты приложений.
-
-```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-2.sh
-chmod 700 ochenstarik-server-2.sh
-bash -n ochenstarik-server-2.sh
-sudo ./ochenstarik-server-2.sh
-```
-
-Проверка:
-
-```bash
-sudo ufw status verbose
-cat /etc/ochenstarik-server/ip-family.conf
-cat /proc/sys/net/ipv6/conf/all/disable_ipv6
-timedatectl
-```
-
-## 3. Администратор и защита SSH
-
-Файл: `ochenstarik-server-user-3.sh`.
-
-При каждом запуске скрипт предлагает два режима:
-
-1. новая установка или повторная настройка администратора и SSH;
-2. только добавление открытых портов в UFW без изменения пользователя и SSH.
-
-В режиме новой установки скрипт интерактивно запрашивает имя администратора, SSH-ключ и пароль. SSH-порт автоматически читается из защищённого файла, созданного этапом 2. Если этап 2 не выполнялся, скрипт предложит выбрать порт вручную. Затем он:
-
-- создаёт или обновляет пользователя;
-- добавляет пользователя в группу `sudo`;
-- назначает пользователю его домашнюю папку и всё содержимое `.ssh`;
-- устанавливает права `700` для `.ssh` и `600` для `authorized_keys` и остальных файлов ключей;
-- запрещает вход `root` по SSH;
-- переносит SSH на выбранный порт и добавляет для него правило UFW;
-- настраивает fail2ban;
-- по выбору управляет правилами UFW.
-
-Правила UFW добавляются с учётом режима IPv4/IPv6, сохранённого скриптом 2. Новые порты также записываются в общий список управляемых правил, поэтому последующее переключение IP-режима пересоздаст их корректно.
-
-Для отдельного запуска сначала установите зависимости:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y sudo ufw fail2ban openssl openssh-server
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-user-3.sh
-chmod 700 ochenstarik-server-user-3.sh
-bash -n ochenstarik-server-user-3.sh
-sudo ./ochenstarik-server-user-3.sh
-```
-
-Не закрывая текущую сессию, откройте второй терминал и проверьте вход:
-
-```bash
-ssh -p ВЫБРАННЫЙ_ПОРТ ИМЯ_ПОЛЬЗОВАТЕЛЯ@IP_СЕРВЕРА
-```
-
-Только после успешной проверки можно удалить временное правило порта 22:
-
-```bash
-sudo ufw delete allow 22/tcp
-```
-
-Чтобы позднее открыть дополнительные порты, повторно запустите скрипт, выберите пункт `2` и введите правила через пробел или запятую:
-
-```text
-80 443/tcp 53/udp 40000
-```
-
-Для записей без протокола используется TCP. Допустимы только порты от `1` до `65535`. Если UFW неактивен, правила будут сохранены, но скрипт не включит брандмауэр автоматически во избежание потери SSH-доступа.
-
-## 4. Telegram-уведомления о входах по SSH
-
-Файл: `ochenstarik-server-tg-4.sh`.
-
-Создайте бота через `@BotFather`, отправьте ему сообщение и узнайте ID чата. Скрипт запросит токен и ID интерактивно, отправит тестовое сообщение и подключит уведомления через PAM.
-
-Для отдельного запуска:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y curl openssh-server logrotate
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-tg-4.sh
-chmod 700 ochenstarik-server-tg-4.sh
-bash -n ochenstarik-server-tg-4.sh
-sudo ./ochenstarik-server-tg-4.sh
-```
-
-Журнал уведомлений:
-
-```bash
-sudo tail -f /var/log/ochenstarik-ssh-login-telegram.log
-```
-
-Токен сохраняется на сервере в `/etc/ochenstarik-server/telegram.conf` с ограниченными правами. Не добавляйте этот файл в репозиторий.
-
-## 5. Системный VPN через Xray
-
-Файл: `ochenstarik-server-vpn-5.sh`.
-
-Скрипт устанавливает Xray и необходимые пакеты, принимает прямую ссылку `vless://` либо HTTPS-ссылку подписки 3x-ui и настраивает маршрутизацию через `nftables`. Если подписка содержит VLESS-ссылки на нескольких портах, скрипт выводит доступные порты и просит выбрать нужный. Поддерживается VLESS с транспортом TCP/RAW и REALITY.
-
-```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-vpn-5.sh
-chmod 700 ochenstarik-server-vpn-5.sh
-bash -n ochenstarik-server-vpn-5.sh
-sudo ./ochenstarik-server-vpn-5.sh
-```
-
-Во время запуска ссылка вводится скрыто. Скрипт сравнивает внешний IP до и после настройки и использует автоматический откат при ошибке. SSH и ответы сервисов на портах `443` и `63636` остаются на прямом маршруте.
-
-Проверка маршрутизации:
-
-```bash
-sudo /usr/local/sbin/ochenstarik-xray-routing status
-curl -4 https://api.ipify.org
-```
-
-Отключение системного VPN:
-
-```bash
+sudo ./ochenstarik-server-vpn-5.sh --enable
 sudo ./ochenstarik-server-vpn-5.sh --disable
+sudo ./ochenstarik-server-vpn-5.sh --reconfigure
+sudo ./ochenstarik-server-vpn-5.sh --status
 ```
 
-## 6. Панель 3x-ui и локальный proxy Cloudflare WARP
+Disconnecting removes the system routing rules but keeps Xray and its configuration so the VPN can be reconnected without entering the subscription again.
 
-Файл: `ochenstarik-server-panel-warp-6.sh`.
+## Optional AI agents
 
-Скрипт предлагает выбрать три разных порта:
+Step 8 offers a multiple selection of seven popular agents: Hermes Agent, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, and Pi Coding Agent. Installers are downloaded only from each project's official HTTPS endpoint, checked with `bash -n`, and launched as the selected regular user rather than directly as `root`.
 
-- порт веб-панели 3x-ui, по умолчанию `2053`;
-- порт подписок 3x-ui, по умолчанию `2096`;
-- локальный SOCKS5/HTTP proxy-порт WARP, по умолчанию `40000`.
+AutoGPT is a larger Docker-based platform. Its official installer can request `sudo`, install Docker-related dependencies, and start local services. Pi is a lightweight terminal coding agent; after installation, start it with `pi` and use `/login` to connect a supported provider.
 
-3x-ui устанавливается официальным интерактивным установщиком. После установки выбранные порты записываются в стандартную SQLite-базу с предварительной резервной копией. Скрипт включает сервис подписок, запускает `x-ui` и проверяет оба TCP-слушателя.
+The script does not request or store model-provider API keys. After installation, log in as the selected user and run the displayed onboarding command. AI agents can execute commands, access files, install plugins, and use network services; review their permissions and sandbox settings before connecting production data or secrets.
 
-Cloudflare WARP устанавливается из официального APT-репозитория, переводится в Local proxy mode через MASQUE и проверяется запросом к Cloudflare: ответ должен содержать `warp=on`.
+## Firewall and SSH notes
+
+- Step 2 supports IPv4-only, IPv6-only, and dual-stack UFW rules. IPv4-only mode blocks public inbound IPv6 through UFW without disabling the kernel IPv6 stack.
+- A repeated step 2 run can change the IP-family mode or add ports without reinstalling everything.
+- Step 3 reads the SSH port chosen in step 2 and creates an administrator with sudo access.
+- The home directory, `.ssh`, and `authorized_keys` ownership and permissions are checked on every run.
+- Do not remove temporary port 22 access until a new SSH session succeeds on the selected port.
+
+## Backups
+
+Step 7 can create:
+
+- one initial snapshot that is never rotated automatically;
+- daily backups retained for 7 days;
+- weekly backups retained for 4 weeks;
+- monthly backups retained for 12 months.
+
+Schedules are selected independently, so any combination can be enabled. Keep an additional copy on another server or storage device; a local backup does not protect against loss of the entire host.
+
+## Multi-server monitoring and management
+
+[Server Monitor Manager](https://github.com/ochenstarik-ui/server-monitor-manager) is the companion project for centralized server operations. Its planned architecture includes:
+
+- a Flutter client for Android and iOS;
+- an ASP.NET Core API with accounts, TOTP two-factor authentication, and SignalR;
+- an outbound Linux agent for metrics and managed operations;
+- support for adding and monitoring multiple servers from one application.
+
+The manager is under active early development. Review its security and development documentation before connecting real production servers.
+
+## Requirements
+
+- Ubuntu Server with systemd and APT;
+- root access through `sudo`;
+- an active SSH session;
+- outbound HTTPS access to GitHub or GitHub codeload;
+- a valid public SSH key for the administrator setup.
+
+## Update
+
+For a Git clone:
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-panel-warp-6.sh
-chmod 700 ochenstarik-server-panel-warp-6.sh
-bash -n ochenstarik-server-panel-warp-6.sh
-sudo ./ochenstarik-server-panel-warp-6.sh
+cd ~/lightweight-server
+git pull
+sudo ./ochenstarik-server-install.sh
 ```
 
-В UFW открываются и проверяются `80/tcp`, `443/tcp`, выбранный порт панели и выбранный порт подписок. WARP слушает только локально на `127.0.0.1:40000` либо другом выбранном порту. Этот порт намеренно не публикуется через UFW, поскольку локальный proxy не требует аутентификации.
-
-Публичные порты 3x-ui открываются только для семейств адресов, выбранных на этапе 2. В режиме `ipv4` скрипт не создаёт правил IPv6.
-
-Поддерживаются официально доступные пакеты WARP для Ubuntu `jammy`, `noble`, `resolute` и Debian `bookworm`, `trixie` на `amd64` и `arm64`.
-
-Официальные источники: [установка 3x-ui](https://github.com/MHSanaei/3x-ui/wiki/Installation), [пакеты Cloudflare WARP](https://pkg.cloudflareclient.com/) и [режимы WARP](https://developers.cloudflare.com/warp-client/warp-modes/).
-
-## 7. Резервные копии сервера
-
-Файл: `ochenstarik-server-backup-7.sh`.
-
-Скрипт создаёт полный сжатый снимок корневой файловой системы с сохранением владельцев, ACL и расширенных атрибутов. Виртуальные файловые системы, временные каталоги, swap, подключённые диски и сам каталог бэкапов исключаются. Первичный снимок создаётся сразу, повторно не перезаписывается и не участвует в ротации. Если файловая система поддерживает атрибут `immutable`, первичный архив и его контрольная сумма дополнительно защищаются от случайного удаления.
-
-При установке можно выбрать несколько расписаний одним вводом, например `1 3`:
-
-- ежедневное — хранится 7 последних архивов;
-- еженедельное — хранится 4 последних архива;
-- ежемесячное — хранится 12 последних архивов;
-- только первичный снимок без автоматического расписания.
+## Reset project-managed configuration
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-backup-7.sh
-chmod 700 ochenstarik-server-backup-7.sh
-bash -n ochenstarik-server-backup-7.sh
-sudo ./ochenstarik-server-backup-7.sh
+cd ~/lightweight-server
+sudo ./ochenstarik-server-uninstall.sh
 ```
 
-По умолчанию архивы сохраняются в `/var/backups/ochenstarik-server`, но во время установки можно указать абсолютный путь на другом диске. Незавершённые архивы имеют суффикс `.partial` и не попадают в ротацию. Для каждого готового архива создаётся файл `.sha256`.
-
-Проверка расписаний и ручной запуск:
-
-```bash
-systemctl list-timers "ochenstarik-backup-*"
-sudo /usr/local/sbin/ochenstarik-server-backup daily
-sudo journalctl -u ochenstarik-backup@daily.service
-```
-
-Проверка целостности первичного снимка:
-
-```bash
-cd /var/backups/ochenstarik-server/initial
-sha256sum -c ./*.sha256
-```
-
-Восстанавливайте архив только из rescue-системы или в отдельный пустой каталог, предварительно проверив контрольную сумму. Пример распаковки в подготовленный каталог `/restore`:
-
-```bash
-mkdir -p /restore
-zstd -dc /ПУТЬ/К/АРХИВУ.tar.zst | tar --acls --xattrs --numeric-owner -xpf - -C /restore
-```
-
-Это локальная резервная копия, а не защита от отказа диска или потери сервера. Регулярно переносите готовые архивы и `.sha256` на отдельный сервер или накопитель. Снимок создаётся с работающей системы; для активно изменяющихся баз данных дополнительно используйте штатный экспорт или согласованный снимок самой базы.
-
-## Полная установка
-
-Если нужны все модули, запускайте их по очереди:
-
-```bash
-sudo ./ochenstarik-server-1.sh
-sudo ./ochenstarik-server-2.sh
-sudo ./ochenstarik-server-user-3.sh
-sudo ./ochenstarik-server-tg-4.sh
-sudo ./ochenstarik-server-vpn-5.sh
-sudo ./ochenstarik-server-panel-warp-6.sh
-sudo ./ochenstarik-server-backup-7.sh
-```
-
-VPN, 3x-ui, WARP, Telegram-уведомления и автоматические расписания резервного копирования являются необязательными этапами.
-
-## Безопасность
-
-- Всегда проверяйте скачанные скрипты перед запуском от `root`.
-- Не публикуйте токены Telegram, пароли, приватные SSH-ключи и ссылки VLESS.
-- Не закрывайте действующую SSH-сессию во время переноса SSH на новый порт.
-- Перед настройкой на рабочем сервере сделайте резервную копию важных данных.
+Read every confirmation carefully. The reset script preserves critical Ubuntu packages and avoids removing access until explicitly confirmed.

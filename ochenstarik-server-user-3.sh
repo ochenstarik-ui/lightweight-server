@@ -60,6 +60,13 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
+read_sshd_setting() {
+  local setting="$1" config="$2" value
+  value="$(awk -v setting="$setting" '$1 == setting { print $2; exit }' <<< "$config")"
+  [[ -n "$value" ]] || die "SSH setting was not found in effective configuration: $setting"
+  printf '%s' "$value"
+}
+
 is_valid_port() {
   local port="$1"
   [[ "$port" =~ ^[0-9]{1,5}$ ]] || return 1
@@ -465,9 +472,14 @@ EOF
 chmod 644 "$SSHD_DROPIN"
 
 sshd -t || die "sshd syntax validation failed"
-effective_port="$(sshd -T | awk '$1 == "port" { print $2; exit }')"
-effective_root="$(sshd -T | awk '$1 == "permitrootlogin" { print $2; exit }')"
-effective_password="$(sshd -T | awk '$1 == "passwordauthentication" { print $2; exit }')"
+# Capture the complete output once. With pipefail enabled, piping `sshd -T`
+# into an awk program that exits after the first match can terminate sshd with
+# SIGPIPE (status 141) and abort the script even though the configuration is
+# valid.
+effective_sshd_config="$(sshd -T)" || die "Could not read effective SSH configuration"
+effective_port="$(read_sshd_setting port "$effective_sshd_config")"
+effective_root="$(read_sshd_setting permitrootlogin "$effective_sshd_config")"
+effective_password="$(read_sshd_setting passwordauthentication "$effective_sshd_config")"
 [[ "$effective_port" == "$SSH_PORT" ]] || die "Effective SSH port is $effective_port, expected $SSH_PORT"
 [[ "$effective_root" == no ]] || die "Effective PermitRootLogin is $effective_root, expected no"
 [[ "$effective_password" == "$PASSWORD_AUTH" ]] || die "Effective PasswordAuthentication is $effective_password, expected $PASSWORD_AUTH"
