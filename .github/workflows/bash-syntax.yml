@@ -52,3 +52,6 @@ jobs:
 
       - name: Test Server Monitor Manager lifecycle
         run: bash tests/test-monitor-manager-lifecycle.sh
+
+      - name: Test Server Monitor Manager extended metrics
+        run: bash tests/test-monitor-manager-metrics.sh

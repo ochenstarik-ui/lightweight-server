@@ -137,9 +137,21 @@ printf 'LOAD1=%s\n' "$(cut -d' ' -f1 /proc/loadavg)"
 printf 'CPU_COUNT=%s\n' "$(getconf _NPROCESSORS_ONLN)"
 printf 'MEM_TOTAL_KB=%s\n' "$(read_mem_value MemTotal)"
 printf 'MEM_AVAILABLE_KB=%s\n' "$(read_mem_value MemAvailable)"
+printf 'SWAP_TOTAL_KB=%s\n' "$(read_mem_value SwapTotal)"
+printf 'SWAP_FREE_KB=%s\n' "$(read_mem_value SwapFree)"
 df -Pk / | awk 'NR == 2 {
   printf "DISK_TOTAL_KB=%s\nDISK_AVAILABLE_KB=%s\n", $2, $4
 }'
+df -Pi / | awk 'NR == 2 {
+  printf "DISK_INODES_TOTAL=%s\nDISK_INODES_FREE=%s\n", $2, $4
+}'
+awk 'BEGIN { rx=0; tx=0 }
+  FNR == 1 && FILENAME !~ "/lo/" { rx += $1 }
+  FNR == 1 && FILENAME !~ "/lo/" { getline value < (FILENAME ~ /rx_bytes/ ? gensub(/rx_bytes$/, "tx_bytes", 1, FILENAME) : FILENAME); tx += value }
+  END { printf "NETWORK_RX_BYTES=%.0f\nNETWORK_TX_BYTES=%.0f\n", rx, tx }
+' /sys/class/net/*/statistics/rx_bytes 2>/dev/null || printf 'NETWORK_RX_BYTES=0\nNETWORK_TX_BYTES=0\n'
+printf 'SYSTEMD_SSH=%s\n' "$(systemctl is-active ssh 2>/dev/null || true)"
+printf 'SYSTEMD_WIREGUARD=%s\n' "$(systemctl is-active wg-quick@smm0.service 2>/dev/null || true)"
 printf 'KERNEL=%s\n' "$(uname -r)"
 EOF
   chown root:root "$MONITOR_COMMAND"
