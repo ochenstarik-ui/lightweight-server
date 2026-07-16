@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly REPO_RAW_BASE="https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 declare -a STEP_FILES=(
@@ -33,8 +32,11 @@ declare -A MASTER_TEXT=()
 load_master_text() {
   MASTER_TEXT=(
     [intro_title]="Unified lightweight-server installer"
-    [intro_body]="Steps are shown in order. Each step can be installed, skipped, or used to exit the installer. Keep the current SSH session open while changing the SSH port and test the new login in another terminal."
+    [intro_body]="Select any installation step from the main menu. After a step finishes, the installer returns to this menu. Keep the current SSH session open while changing the SSH port and test the new login in another terminal."
     [step]="Step %s of %s: %s"
+    [main_menu]="Main menu"
+    [select_step]="Enter a step number to install it, or 0 to exit: "
+    [exit]="Exit"
     [install]="Install / run this step"
     [skip]="Skip and continue to the next step"
     [finish]="Exit the installer"
@@ -56,8 +58,9 @@ load_master_text() {
   case "$UI_LANG" in
     ru) MASTER_TEXT+=(
       [intro_title]="Единый мастер установки lightweight-server"
-      [intro_body]="Этапы будут показаны по порядку. Каждый можно установить, пропустить или завершить мастер. Не закрывайте текущую SSH-сессию при изменении порта и проверьте новый вход во втором терминале."
+      [intro_body]="Выберите любой этап установки в главном меню. После завершения этапа мастер вернётся обратно в это меню. Не закрывайте текущую SSH-сессию при изменении порта и проверьте новый вход во втором терминале."
       [step]="Этап %s из %s: %s" [install]="Установить / запустить этот этап"
+      [main_menu]="Главное меню" [select_step]="Введите номер этапа для установки или 0 для выхода: " [exit]="Выход"
       [skip]="Пропустить и перейти к следующему" [finish]="Завершить мастер"
       [action]="Выберите действие: " [invalid]="Введите 1, 2 или 3" [interrupted]="Ввод прерван"
       [failed]="Этап завершился с ошибкой." [retry]="Запустить этот этап повторно"
@@ -208,29 +211,35 @@ ensure_step_script() {
   local filename="$1" result_variable="$2" target
   target="${SCRIPT_DIR}/${filename}"
 
-  if [[ -e "$target" ]]; then
-    [[ -f "$target" && ! -L "$target" ]] \
-      || die "Отказ от запуска: $target должен быть обычным файлом"
-  else
-    command -v curl >/dev/null 2>&1 \
-      || die "Не найден curl: установите его командой apt-get install -y curl ca-certificates"
-    [[ -d "$SCRIPT_DIR" && ! -L "$SCRIPT_DIR" && -w "$SCRIPT_DIR" ]] \
-      || die "Каталог $SCRIPT_DIR недоступен для безопасной загрузки"
-
-    log "Файл ${filename} отсутствует; загружаю его из основного репозитория"
-    TEMP_FILE="$(mktemp "${SCRIPT_DIR}/.ochenstarik-server-download.XXXXXX")"
-    chmod 600 "$TEMP_FILE"
-    curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 \
-      --proto '=https' --tlsv1.2 "${REPO_RAW_BASE}/${filename}" -o "$TEMP_FILE"
-    bash -n "$TEMP_FILE" || die "Загруженный файл ${filename} не прошёл проверку Bash"
-    chmod 700 "$TEMP_FILE"
-    mv -- "$TEMP_FILE" "$target"
-    TEMP_FILE=""
-  fi
+  [[ -f "$target" && ! -L "$target" ]] \
+    || die "Не найден локальный файл ${filename}. Скачайте полный архив проекта или выполните git clone, затем запустите мастер из каталога со всеми скриптами."
 
   chmod 700 "$target"
   bash -n "$target" || die "Синтаксическая ошибка в $target"
   printf -v "$result_variable" '%s' "$target"
+}
+
+choose_main_menu_action() {
+  local result_variable="$1" answer index
+  while :; do
+    printf '\n============================================================\n'
+    printf '%s\n' "$(master_msg main_menu)"
+    for index in "${!STEP_FILES[@]}"; do
+      printf '  %s) %s\n' "$((index + 1))" "${STEP_TITLES[index]}"
+    done
+    printf '  0) %s\n' "$(master_msg exit)"
+    read -rp "$(master_msg select_step)" answer || die "$(master_msg interrupted)"
+    answer="${answer:-}"
+    if [[ "$answer" == 0 ]]; then
+      printf -v "$result_variable" '%s' 0
+      return 0
+    fi
+    if [[ "$answer" =~ ^[0-9]+$ ]] && ((10#$answer >= 1 && 10#$answer <= ${#STEP_FILES[@]})); then
+      printf -v "$result_variable" '%s' "$((10#$answer))"
+      return 0
+    fi
+    warn "Введите число от 0 до ${#STEP_FILES[@]}"
+  done
 }
 
 choose_step_action() {
@@ -284,21 +293,15 @@ printf '\n%s\n\n%s\n' "$(master_msg intro_title)" "$(master_msg intro_body)"
 completed=0
 skipped=0
 
-for index in "${!STEP_FILES[@]}"; do
-  step_number="$((index + 1))"
-  action=""
-  choose_step_action "$step_number" "${STEP_TITLES[index]}" action
-  case "$action" in
-    2)
-      skipped="$((skipped + 1))"
-      continue
-      ;;
-    3)
-      print_summary "$completed" "$skipped"
-      exit 0
-      ;;
-  esac
-
+while :; do
+  menu_action=""
+  choose_main_menu_action menu_action
+  if [[ "$menu_action" == 0 ]]; then
+    print_summary "$completed" "$skipped"
+    exit 0
+  fi
+  step_number="$menu_action"
+  index="$((step_number - 1))"
   script_path=""
   ensure_step_script "${STEP_FILES[index]}" script_path
   while :; do
@@ -319,5 +322,3 @@ for index in "${!STEP_FILES[@]}"; do
     esac
   done
 done
-
-print_summary "$completed" "$skipped"

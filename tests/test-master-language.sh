@@ -22,5 +22,10 @@ choose_dialog_language <<< '2' >/dev/null
 [[ "${#STEP_TITLES[@]}" == 8 ]]
 [[ "${STEP_FILES[7]}" == 'ochenstarik-server-ai-agents-8.sh' ]]
 [[ "${STEP_TITLES[7]}" == 'AI-агенты на выбор для обычного пользователя' ]]
+[[ "$(master_msg main_menu)" == 'Главное меню' ]]
+choose_main_menu_action selected_step <<< '8' >/dev/null
+[[ "$selected_step" == 8 ]]
+choose_main_menu_action selected_step <<< '0' >/dev/null
+[[ "$selected_step" == 0 ]]
 
 printf 'Master language selection tests passed.\n'

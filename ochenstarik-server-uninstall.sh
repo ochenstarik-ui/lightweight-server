@@ -218,12 +218,29 @@ remove_panel_and_warp() {
 }
 
 read_backup_root() {
-  local value="/var/backups/ochenstarik-server"
+  local value="/var/backups/ochenstarik-server" line key parsed_value
   if [[ -f "$BACKUP_CONFIG" && ! -L "$BACKUP_CONFIG" ]]; then
     [[ "$(stat -c '%u' "$BACKUP_CONFIG")" == 0 ]] \
       || die "Файл $BACKUP_CONFIG должен принадлежать root"
-    value="$(bash -c 'set -efu; source "$1"; printf "%s" "$BACKUP_ROOT"' \
-      _ "$BACKUP_CONFIG")"
+    [[ "$(stat -c '%a' "$BACKUP_CONFIG")" =~ ^[0-7]*[0-5][0-5]$ ]] \
+      || die "Файл $BACKUP_CONFIG не должен быть доступен для записи группе или всем"
+    parsed_value=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line//$'\r'/}"
+      [[ -n "$line" && "$line" != \#* ]] || continue
+      [[ "$line" == *=* ]] || die "Некорректная строка в $BACKUP_CONFIG: $line"
+      key="${line%%=*}"
+      value="${line#*=}"
+      case "$key" in
+        BACKUP_ROOT)
+          [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] \
+            || die "Некорректный BACKUP_ROOT в $BACKUP_CONFIG"
+          parsed_value="$value"
+          ;;
+        *) die "Неизвестный ключ в $BACKUP_CONFIG: $key" ;;
+      esac
+    done < "$BACKUP_CONFIG"
+    value="${parsed_value:-$value}"
   fi
   [[ "$value" == /* && "$value" != / ]] || die "Опасный путь резервных копий: $value"
   case "$value" in

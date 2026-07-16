@@ -112,6 +112,26 @@ wait_for_tcp_listener() {
   die "${description} не открыл TCP-порт ${port}"
 }
 
+choose_public_access() {
+  local answer
+  printf '\nДоступ к панели 3x-ui и подпискам:\n'
+  printf '  1) Приватный режим: не открывать порты панели и подписок в UFW (рекомендуется)\n'
+  printf '  2) Публичный режим: открыть порты панели и подписок всему Интернету\n'
+  while :; do
+    read -rp 'Режим доступа [1]: ' answer
+    answer="${answer:-1}"
+    case "$answer" in
+      1) XUI_PUBLIC_ACCESS=no; return 0 ;;
+      2)
+        warn "Публичный доступ к панели опасен. Используйте сложный путь, новые учётные данные, TLS и 2FA"
+        XUI_PUBLIC_ACCESS=yes
+        return 0
+        ;;
+      *) warn "Введите 1 или 2" ;;
+    esac
+  done
+}
+
 allow_ufw_port() {
   local port="$1" description="$2" mode
   mode="$(read_ip_mode)"
@@ -265,6 +285,7 @@ forbidden_common=("22" "80" "443")
 PANEL_PORT=""
 SUBSCRIPTION_PORT=""
 WARP_PORT=""
+XUI_PUBLIC_ACCESS=no
 XUI_WEB_PATH="/"
 XUI_SUB_PATH="/sub/"
 choose_port PANEL_PORT "Порт панели 3x-ui" "$DEFAULT_PANEL_PORT" "${forbidden_common[@]}"
@@ -272,11 +293,17 @@ choose_port SUBSCRIPTION_PORT "Порт подписок 3x-ui" "$DEFAULT_SUBSCR
   "${forbidden_common[@]}" "$PANEL_PORT"
 choose_port WARP_PORT "Локальный proxy-порт WARP" "$DEFAULT_WARP_PORT" \
   "${forbidden_common[@]}" "$PANEL_PORT" "$SUBSCRIPTION_PORT"
+choose_public_access
 
 printf '\nБудут использованы порты:\n'
 printf '  3x-ui panel: %s/tcp\n' "$PANEL_PORT"
 printf '  3x-ui subscriptions: %s/tcp\n' "$SUBSCRIPTION_PORT"
 printf '  WARP local proxy: 127.0.0.1:%s/tcp\n\n' "$WARP_PORT"
+if [[ "$XUI_PUBLIC_ACCESS" == yes ]]; then
+  printf '  UFW: порты панели и подписок будут открыты публично\n\n'
+else
+  printf '  UFW: порты панели и подписок не будут открыты публично\n\n'
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 log "Установка системных зависимостей"
@@ -306,13 +333,22 @@ install_cloudflare_warp
 log "Настройка UFW"
 allow_ufw_port 80 "HTTP"
 allow_ufw_port 443 "HTTPS"
-allow_ufw_port "$PANEL_PORT" "панель 3x-ui"
-allow_ufw_port "$SUBSCRIPTION_PORT" "подписки 3x-ui"
+if [[ "$XUI_PUBLIC_ACCESS" == yes ]]; then
+  allow_ufw_port "$PANEL_PORT" "панель 3x-ui"
+  allow_ufw_port "$SUBSCRIPTION_PORT" "подписки 3x-ui"
+else
+  log "UFW: порты панели и подписок оставлены закрытыми для публичного Интернета"
+fi
 ufw --force enable
 
-for port in 80 443 "$PANEL_PORT" "$SUBSCRIPTION_PORT"; do
+for port in 80 443; do
   verify_ufw_port "$port"
 done
+if [[ "$XUI_PUBLIC_ACCESS" == yes ]]; then
+  for port in "$PANEL_PORT" "$SUBSCRIPTION_PORT"; do
+    verify_ufw_port "$port"
+  done
+fi
 
 wait_for_tcp_listener "$PANEL_PORT" "Панель 3x-ui"
 wait_for_tcp_listener "$SUBSCRIPTION_PORT" "Сервис подписок 3x-ui"
@@ -323,4 +359,7 @@ printf 'Панель 3x-ui:          http(s)://<server-ip>:%s%s\n' "$PANEL_PORT"
 printf 'Подписки 3x-ui:        http(s)://<server-ip>:%s%s\n' "$SUBSCRIPTION_PORT" "$XUI_SUB_PATH"
 printf 'Локальный WARP proxy:  socks5://127.0.0.1:%s\n' "$WARP_PORT"
 printf '\nПорт WARP не открыт публично в UFW: локальный proxy не требует аутентификации.\n'
+if [[ "$XUI_PUBLIC_ACCESS" != yes ]]; then
+  printf 'Порты панели и подписок не открыты публично. Используйте SSH tunnel, management VPN или повторный запуск с явным публичным режимом.\n'
+fi
 printf 'Настройте TLS, сложный путь панели, новые учётные данные и двухфакторную аутентификацию в 3x-ui.\n'
