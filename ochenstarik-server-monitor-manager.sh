@@ -8,6 +8,7 @@ readonly MONITOR_COMMAND="/usr/local/libexec/ochenstarik-server-monitor"
 readonly AUTHORIZED_KEYS="${MONITOR_HOME}/.ssh/authorized_keys"
 readonly MESH_DIR="/etc/${APP_NAME}"
 readonly NODES_DIR="${MESH_DIR}/nodes"
+readonly TOKENS_DIR="${MESH_DIR}/tokens"
 readonly HUB_CONFIG="${MESH_DIR}/hub.conf"
 readonly HUB_PRIVATE_KEY="${MESH_DIR}/hub.key"
 readonly LINKS_FILE="${MESH_DIR}/links"
@@ -191,6 +192,7 @@ export LC_ALL=C
 
 readonly STATE_DIR="/etc/ochenstarik-server-monitor-manager"
 readonly NODES_DIR="${STATE_DIR}/nodes"
+readonly TOKENS_DIR="${STATE_DIR}/tokens"
 readonly HUB_CONFIG="${STATE_DIR}/hub.conf"
 readonly HUB_PRIVATE_KEY="${STATE_DIR}/hub.key"
 readonly LINKS_FILE="${STATE_DIR}/links"
@@ -241,7 +243,7 @@ next_address() {
   for host in $(seq 2 254); do
     address="10.77.0.${host}"
     used=false
-    for file in "$NODES_DIR"/*.node; do
+    for file in "$NODES_DIR"/*.node "$TOKENS_DIR"/*.token*; do
       [[ -e "$file" ]] || continue
       if [[ "$(config_value ADDRESS "$file")" == "$address" ]]; then
         used=true
@@ -257,29 +259,119 @@ base64url_encode() {
   base64 -w0 | tr '+/' '-_' | tr -d '='
 }
 
+base64url_decode() {
+  local data="$1" remainder
+  data="${data//-/+}"
+  data="${data//_/\/}"
+  remainder=$(( ${#data} % 4 ))
+  if (( remainder == 2 )); then data+='=='
+  elif (( remainder == 3 )); then data+='='
+  elif (( remainder == 1 )); then return 1
+  fi
+  printf '%s' "$data" | base64 -d
+}
+
+payload_value() {
+  local payload="$1" key="$2"
+  printf '%s\n' "$payload" | awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+token_cleanup() {
+  local file expires now
+  now="$(date +%s)"
+  for file in "$TOKENS_DIR"/*.token; do
+    [[ -e "$file" ]] || continue
+    expires="$(config_value EXPIRES "$file")"
+    [[ "$expires" =~ ^[0-9]+$ ]] || { rm -f -- "$file"; continue; }
+    (( expires > now )) || rm -f -- "$file"
+  done
+}
+
 node_code() {
-  local name="$1" private_key public_key address endpoint port payload code file
+  local name="$1" address endpoint port payload code token token_hash expires file
   valid_name "$name" || die "Имя: строчные латинские буквы, цифры и дефис, максимум 32 символа"
   node_exists "$name" && die "Узел $name уже существует"
-  private_key="$(wg genkey)"
-  public_key="$(printf '%s' "$private_key" | wg pubkey)"
+  token_cleanup
+  for file in "$TOKENS_DIR"/*.token; do
+    [[ -e "$file" ]] || continue
+    [[ "$(config_value NAME "$file")" != "$name" ]] \
+      || die "Для узла $name уже существует действующий enrollment-код"
+  done
   address="$(next_address)"
   endpoint="$(config_value HUB_ENDPOINT "$HUB_CONFIG")"
   port="$(config_value WG_PORT "$HUB_CONFIG")"
-  file="$(node_file "$name")"
+  token="$(openssl rand -hex 32)"
+  token_hash="$(printf '%s' "$token" | sha256sum | awk '{ print $1 }')"
+  expires=$(( $(date +%s) + 600 ))
+  file="${TOKENS_DIR}/${token_hash}.token"
   umask 077
   {
     printf 'NAME=%s\n' "$name"
     printf 'ADDRESS=%s\n' "$address"
-    printf 'PUBLIC_KEY=%s\n' "$public_key"
+    printf 'EXPIRES=%s\n' "$expires"
   } > "$file"
+  payload="$(printf 'VERSION=2\nNAME=%s\nADDRESS=%s/32\nTOKEN=%s\nEXPIRES=%s\nHUB_PUBLIC_KEY=%s\nENDPOINT=%s:%s\nALLOWED_IPS=10.77.0.0/24\n' \
+    "$name" "$address" "$token" "$expires" "$(wg pubkey < "$HUB_PRIVATE_KEY")" "$endpoint" "$port")"
+  code="SMM2-$(printf '%s' "$payload" | base64url_encode)"
+  unset token payload
+  printf '\nОдноразовый enrollment-код для узла %s (действует 10 минут):\n%s\n\n' "$name" "$code"
+  printf 'Приватный WireGuard-ключ будет создан только на Node. Не сохраняйте код в чатах или логах.\n'
+}
+
+node_enroll() {
+  local request="${SMM_ENROLL_REQUEST:-}" payload version token token_hash token_file consuming_file
+  local name address public_key stored_name stored_address expires now node_path ack
+  local hub_public_key endpoint allowed_ips
+  if [[ -z "$request" && -r /dev/tty ]]; then
+    IFS= read -r -s -p 'Вставьте request-код SMMREQ1: ' request < /dev/tty
+    printf '\n'
+  fi
+  [[ "$request" == SMMREQ1-* ]] || die "Ожидается request-код SMMREQ1-..."
+  payload="$(base64url_decode "${request#SMMREQ1-}")" || die "Не удалось декодировать request-код"
+  version="$(payload_value "$payload" VERSION)"
+  token="$(payload_value "$payload" TOKEN)"
+  name="$(payload_value "$payload" NAME)"
+  address="$(payload_value "$payload" ADDRESS)"
+  public_key="$(payload_value "$payload" PUBLIC_KEY)"
+  [[ "$version" == 1 ]] || die "Неподдерживаемая версия request-кода"
+  [[ "$token" =~ ^[a-f0-9]{64}$ ]] || die "Некорректный enrollment token"
+  valid_name "$name" || die "Некорректное имя Node"
+  [[ "$address" =~ ^10\.77\.0\.([2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])/32$ ]] \
+    || die "Некорректный адрес Node"
+  [[ "$(printf '%s' "$public_key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ]] \
+    || die "Некорректный публичный WireGuard-ключ Node"
+  token_hash="$(printf '%s' "$token" | sha256sum | awk '{ print $1 }')"
+  token_file="${TOKENS_DIR}/${token_hash}.token"
+  [[ -f "$token_file" ]] || die "Enrollment token не найден, уже использован или истёк"
+  stored_name="$(config_value NAME "$token_file")"
+  stored_address="$(config_value ADDRESS "$token_file")"
+  expires="$(config_value EXPIRES "$token_file")"
+  now="$(date +%s)"
+  [[ "$stored_name" == "$name" && "${address%/32}" == "$stored_address" ]] \
+    || die "Параметры Node не совпадают с enrollment token"
+  [[ "$expires" =~ ^[0-9]+$ ]] && (( expires > now )) \
+    || { rm -f -- "$token_file"; die "Enrollment token истёк"; }
+  node_exists "$name" && die "Узел $name уже зарегистрирован"
+  consuming_file="${token_file}.consuming"
+  mv -- "$token_file" "$consuming_file" \
+    || die "Enrollment token уже обрабатывается"
+  node_path="$(node_file "$name")"
+  umask 077
+  {
+    printf 'NAME=%s\n' "$name"
+    printf 'ADDRESS=%s\n' "${address%/32}"
+    printf 'PUBLIC_KEY=%s\n' "$public_key"
+  } > "$node_path"
   render_wireguard_config
-  payload="$(printf 'VERSION=1\nNAME=%s\nADDRESS=%s/32\nPRIVATE_KEY=%s\nHUB_PUBLIC_KEY=%s\nENDPOINT=%s:%s\nALLOWED_IPS=10.77.0.0/24\n' \
-    "$name" "$address" "$private_key" "$(wg pubkey < "$HUB_PRIVATE_KEY")" "$endpoint" "$port")"
-  code="SMM1-$(printf '%s' "$payload" | base64url_encode)"
-  unset private_key payload
-  printf '\nСекретный код конфигурации для узла %s:\n%s\n\n' "$name" "$code"
-  printf 'Код содержит приватный ключ узла. Используйте его только на одном целевом сервере и не сохраняйте в чатах или логах.\n'
+  rm -f -- "$consuming_file"
+  hub_public_key="$(wg pubkey < "$HUB_PRIVATE_KEY")"
+  endpoint="$(config_value HUB_ENDPOINT "$HUB_CONFIG"):$(config_value WG_PORT "$HUB_CONFIG")"
+  allowed_ips="10.77.0.0/24"
+  ack="$(printf '%s|%s|%s|%s|%s|%s|%s' \
+    "$token" "$public_key" "$name" "$address" "$hub_public_key" "$endpoint" "$allowed_ips" \
+    | sha256sum | awk '{ print $1 }')"
+  unset token payload
+  printf '\nNode зарегистрирован. Верните этот код в установщик Node:\nSMMACK1-%s\n\n' "$ack"
 }
 
 restore_firewall() {
@@ -409,6 +501,7 @@ main() {
   [[ -r "$HUB_CONFIG" ]] || die "Mesh Hub не установлен"
   case "$action" in
     node-code) [[ $# -eq 2 ]] || die "Использование: $0 node-code NAME"; node_code "$2" ;;
+    node-enroll) [[ $# -eq 1 ]] || die "Использование: $0 node-enroll"; node_enroll ;;
     node-remove) [[ $# -eq 2 ]] || die "Использование: $0 node-remove NAME"; remove_node "$2" ;;
     nodes) list_nodes ;;
     links) list_links ;;
@@ -417,7 +510,7 @@ main() {
     render) render_wireguard_config ;;
     firewall-restore) restore_firewall ;;
     status) status ;;
-    *) die "Команды: node-code, node-remove, nodes, links, link-connect, link-disconnect, status" ;;
+    *) die "Команды: node-code, node-enroll, node-remove, nodes, links, link-connect, link-disconnect, status" ;;
   esac
 }
 
@@ -487,7 +580,7 @@ install_hub() {
   install_monitoring
   install_mesh_dependencies
   read_hub_endpoint
-  install -d -m 0700 -o root -g root "$MESH_DIR" "$NODES_DIR"
+  install -d -m 0700 -o root -g root "$MESH_DIR" "$NODES_DIR" "$TOKENS_DIR"
   install -d -m 0700 -o root -g root /etc/wireguard
   [[ -f "$HUB_PRIVATE_KEY" ]] || { umask 077; wg genkey > "$HUB_PRIVATE_KEY"; }
   chmod 0600 "$HUB_PRIVATE_KEY"
@@ -521,6 +614,10 @@ EOF
   log "Включить связь: sudo ochenstarik-smm link-connect ai-agent home"
 }
 
+base64url_encode() {
+  base64 -w0 | tr '+/' '-_' | tr -d '='
+}
+
 base64url_decode() {
   local data="$1" remainder
   data="${data//-/+}"
@@ -543,37 +640,68 @@ read_join_code() {
     JOIN_CODE="$SMM_JOIN_CODE"
   elif [[ -r /dev/tty ]]; then
     printf '\nНа главном сервере выполните: sudo ochenstarik-smm node-code ИМЯ\n'
-    IFS= read -r -s -p 'Вставьте секретный код SMM1: ' JOIN_CODE < /dev/tty
+    IFS= read -r -s -p 'Вставьте одноразовый код SMM2: ' JOIN_CODE < /dev/tty
     printf '\n'
   else
     die "Передайте код через SMM_JOIN_CODE"
   fi
   JOIN_CODE="${JOIN_CODE//$'\r'/}"
-  [[ "$JOIN_CODE" == SMM1-* ]] || die "Ожидается код формата SMM1-..."
+  [[ "$JOIN_CODE" == SMM2-* ]] || die "Ожидается код формата SMM2-..."
 }
 
 install_node_mesh() {
-  local payload version name address private_key hub_public_key endpoint allowed_ips derived_public tmp ssh_port
+  local payload version name address token expires now private_key public_key
+  local hub_public_key endpoint allowed_ips request_payload request_code ack expected_ack tmp ssh_port
   install_mesh_dependencies
   read_join_code
-  payload="$(base64url_decode "${JOIN_CODE#SMM1-}")" || die "Не удалось декодировать код"
+  payload="$(base64url_decode "${JOIN_CODE#SMM2-}")" || die "Не удалось декодировать код"
   version="$(payload_value "$payload" VERSION)"
   name="$(payload_value "$payload" NAME)"
   address="$(payload_value "$payload" ADDRESS)"
-  private_key="$(payload_value "$payload" PRIVATE_KEY)"
+  token="$(payload_value "$payload" TOKEN)"
+  expires="$(payload_value "$payload" EXPIRES)"
   hub_public_key="$(payload_value "$payload" HUB_PUBLIC_KEY)"
   endpoint="$(payload_value "$payload" ENDPOINT)"
   allowed_ips="$(payload_value "$payload" ALLOWED_IPS)"
-  [[ "$version" == 1 ]] || die "Неподдерживаемая версия кода"
+  [[ "$version" == 2 ]] || die "Неподдерживаемая версия кода"
   [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "Некорректное имя узла"
   [[ "$address" =~ ^10\.77\.0\.([2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])/32$ ]] \
     || die "Некорректный внутренний адрес"
   [[ "$endpoint" =~ ^[A-Za-z0-9.-]+:[0-9]{1,5}$ ]] || die "Некорректный endpoint"
   [[ "$allowed_ips" == "$MESH_CIDR" ]] || die "Некорректная mesh-подсеть"
-  derived_public="$(printf '%s' "$private_key" | wg pubkey 2>/dev/null)" \
-    || die "Некорректный приватный WireGuard-ключ"
+  [[ "$token" =~ ^[a-f0-9]{64}$ ]] || die "Некорректный enrollment token"
+  now="$(date +%s)"
+  [[ "$expires" =~ ^[0-9]+$ ]] && (( expires > now )) || die "Enrollment-код истёк"
   [[ "$(printf '%s' "$hub_public_key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ]] \
     || die "Некорректный публичный ключ Hub"
+  private_key="$(wg genkey)"
+  public_key="$(printf '%s' "$private_key" | wg pubkey)"
+  request_payload="$(printf 'VERSION=1\nTOKEN=%s\nNAME=%s\nADDRESS=%s\nPUBLIC_KEY=%s\n' \
+    "$token" "$name" "$address" "$public_key")"
+  request_code="SMMREQ1-$(printf '%s' "$request_payload" | base64url_encode)"
+  printf '\nПриватный WireGuard-ключ создан локально и не покидает Node.\n'
+  printf 'Request-код:\n\n%s\n\n' "$request_code"
+  printf 'На Hub выполните: sudo ochenstarik-smm node-enroll\n'
+  printf 'Вставьте request-код по скрытому запросу и верните полученный SMMACK1.\n\n'
+  expected_ack="$(printf '%s|%s|%s|%s|%s|%s|%s' \
+    "$token" "$public_key" "$name" "$address" "$hub_public_key" "$endpoint" "$allowed_ips" \
+    | sha256sum | awk '{ print $1 }')"
+  if [[ -n "${SMM_ENROLL_ACK:-}" ]]; then
+    ack="$SMM_ENROLL_ACK"
+    ack="${ack//$'\r'/}"
+    [[ "$ack" == "SMMACK1-${expected_ack}" ]] \
+      || die "Hub не подтвердил регистрацию этого Node"
+  elif [[ -r /dev/tty ]]; then
+    while true; do
+      IFS= read -r -s -p 'Вставьте ответ SMMACK1 от Hub: ' ack < /dev/tty
+      printf '\n'
+      ack="${ack//$'\r'/}"
+      [[ "$ack" == "SMMACK1-${expected_ack}" ]] && break
+      warn "Код не подтверждает этот Node. Повторите вставку или нажмите Ctrl+C."
+    done
+  else
+    die "Передайте подтверждение через SMM_ENROLL_ACK"
+  fi
   install -d -m 0700 -o root -g root /etc/wireguard "$MESH_DIR"
   tmp="$(mktemp)"
   {
@@ -584,9 +712,9 @@ install_node_mesh() {
   install -m 0600 -o root -g root "$tmp" "$WG_CONFIG"
   rm -f -- "$tmp"
   printf 'ROLE=node\nNAME=%s\nADDRESS=%s\nPUBLIC_KEY=%s\n' \
-    "$name" "$address" "$derived_public" > "$MESH_DIR/node.conf"
+    "$name" "$address" "$public_key" > "$MESH_DIR/node.conf"
   chmod 0600 "$MESH_DIR/node.conf"
-  unset private_key payload JOIN_CODE SMM_JOIN_CODE
+  unset private_key token payload request_payload JOIN_CODE SMM_JOIN_CODE SMM_ENROLL_ACK ack expected_ack
   systemctl enable --now "wg-quick@${WG_INTERFACE}.service"
   ssh_port="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')"
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active' && [[ -n "$ssh_port" ]]; then

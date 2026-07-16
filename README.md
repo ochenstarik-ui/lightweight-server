@@ -92,7 +92,7 @@ bash -n ochenstarik-server-monitor-manager.sh
 sudo ./ochenstarik-server-monitor-manager.sh hub
 ```
 
-Create a separate configuration code for each Node on the Hub, then run the same installer with `node` on the matching server:
+Create a separate 10-minute enrollment code for each Node on the Hub, then run the same installer with `node` on the matching server:
 
 ```bash
 sudo ochenstarik-smm node-code ai-agent
@@ -109,7 +109,7 @@ sudo ochenstarik-smm nodes
 sudo ochenstarik-smm links
 ```
 
-The current configuration code contains the Node private WireGuard key and is intended only for early testing. Do not store it in Git or messages. Local Node key generation and expiring one-time enrollment are tracked before production use.
+The Node installer creates its private WireGuard key locally and prints an `SMMREQ1` request. In a second terminal run `sudo ochenstarik-smm node-enroll` on the Hub, paste the request at the hidden prompt, and return the resulting `SMMACK1` code to the Node installer. The enrollment code expires after 10 minutes and is consumed by the first successful registration.
 
 ## Installation flow
 

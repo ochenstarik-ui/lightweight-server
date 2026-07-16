@@ -43,3 +43,6 @@ jobs:
 
       - name: Test step 8 AI agent catalog
         run: bash tests/test-step8-agent-catalog.sh
+
+      - name: Test Server Monitor Manager enrollment
+        run: bash tests/test-monitor-manager-enrollment.sh
