@@ -208,7 +208,7 @@ EOF
 verify_sshd() {
   sshd -t
   sshd -T -C "user=${MONITOR_USER},host=localhost,addr=127.0.0.1" \
-    | grep -qi '^pubkeyauthentication yes$' \
+    | awk '$1 == "pubkeyauthentication" && $2 == "yes" { enabled=1 } END { exit !enabled }' \
     || die "В sshd отключена аутентификация по публичному ключу"
 }
 
