@@ -196,8 +196,10 @@ create_monitor_user() {
 
   install -d -m 0755 -o root -g root /etc/ssh/sshd_config.d
   cat > "$MONITOR_SSH_CONFIG" <<'EOF'
-# Required by the restricted Server Monitor Manager identity.
-PubkeyAuthentication yes
+# Required by the restricted Server Monitor Manager identity only.
+Match User ochenstarik-monitor
+    PubkeyAuthentication yes
+Match all
 EOF
   chown root:root "$MONITOR_SSH_CONFIG"
   chmod 0644 "$MONITOR_SSH_CONFIG"
@@ -205,7 +207,8 @@ EOF
 
 verify_sshd() {
   sshd -t
-  sshd -T | grep -qi '^pubkeyauthentication yes$' \
+  sshd -T -C "user=${MONITOR_USER},host=localhost,addr=127.0.0.1" \
+    | grep -qi '^pubkeyauthentication yes$' \
     || die "В sshd отключена аутентификация по публичному ключу"
 }
 

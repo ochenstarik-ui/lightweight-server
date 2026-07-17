@@ -70,11 +70,11 @@ ip netns exec "$target" wg set smm0 \
 ip -n "$hub" address add 10.77.0.1/24 dev smm0
 ip -n "$source" address add 10.77.0.2/32 dev smm0
 ip -n "$target" address add 10.77.0.3/32 dev smm0
-ip -n "$source" route add 10.77.0.0/24 dev smm0
-ip -n "$target" route add 10.77.0.0/24 dev smm0
 for namespace in "$hub" "$source" "$target"; do
   ip -n "$namespace" link set smm0 up
 done
+ip -n "$source" route add 10.77.0.0/24 dev smm0
+ip -n "$target" route add 10.77.0.0/24 dev smm0
 ip netns exec "$hub" sysctl -q -w net.ipv4.ip_forward=1
 
 helper="$temporary/ochenstarik-smm-hub"
