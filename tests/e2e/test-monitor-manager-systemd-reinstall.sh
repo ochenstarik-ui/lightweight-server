@@ -86,6 +86,8 @@ docker exec "$container" systemctl is-active --quiet ochenstarik-smm-firewall.ti
 docker exec "$container" systemctl start ochenstarik-smm-firewall.service
 docker exec "$container" ip address show dev smm0 | grep -Fq '10.77.0.1/24'
 docker exec "$container" nft list table inet ochenstarik_smm | grep -Fq 'iifname "smm0" oifname "smm0" drop'
-docker exec "$container" test "$(sha256sum /etc/ochenstarik-server-monitor-manager/hub.key | awk '{ print $1 }')" = "$first_private_key_hash"
+reboot_private_key_hash="$(docker exec "$container" \
+  sha256sum /etc/ochenstarik-server-monitor-manager/hub.key | awk '{ print $1 }')"
+[[ "$reboot_private_key_hash" == "$first_private_key_hash" ]]
 
 printf 'Server Monitor Manager repeated-install and reboot checks passed.\n'
