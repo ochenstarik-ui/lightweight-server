@@ -53,6 +53,7 @@ The wizard intentionally requires all module scripts to be present locally. Use 
 | `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
 | `ochenstarik-server-monitor-manager.sh` | Installs the Server Monitor Manager SSH endpoint, public WireGuard Hub, or outbound-only Node | Optional; Hub needs a public UDP endpoint |
 | `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
+| `ochenstarik-server-monitor-manager.sh` | Installs monitoring-only, Hub, or Node roles for Server Monitor Manager | Yes |
 
 Every module can be run independently from the full archive or cloned repository:
 
@@ -63,6 +64,22 @@ sudo ./SCRIPT_NAME.sh
 ```
 
 Replace `SCRIPT_NAME.sh` with the required filename from the table.
+
+The Server Monitor Manager installer supports repeatable role-aware commands:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh install-monitor
+sudo ./ochenstarik-server-monitor-manager.sh install-hub
+sudo ./ochenstarik-server-monitor-manager.sh install-node
+sudo ./ochenstarik-server-monitor-manager.sh status
+sudo ./ochenstarik-server-monitor-manager.sh update
+```
+
+Release artifacts include `SHA256SUMS`. Verify the installer before running it:
+
+```bash
+sha256sum --check SHA256SUMS
+```
 
 ## Server Monitor Manager Hub and Nodes
 

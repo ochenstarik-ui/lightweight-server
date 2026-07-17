@@ -1,0 +1,40 @@
+name: Server Monitor Manager E2E
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'ochenstarik-server-monitor-manager.sh'
+      - 'tests/e2e/**'
+      - '.github/workflows/monitor-manager-e2e.yml'
+  pull_request:
+    paths:
+      - 'ochenstarik-server-monitor-manager.sh'
+      - 'tests/e2e/**'
+      - '.github/workflows/monitor-manager-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wireguard-nftables:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install kernel networking tools
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools nftables iproute2 netcat-openbsd
+
+      - name: Test real WireGuard and nftables data path
+        run: sudo bash tests/e2e/test-monitor-manager-wireguard-nftables.sh
+
+  reinstall-reboot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test repeated install and systemd reboot
+        run: bash tests/e2e/test-monitor-manager-systemd-reinstall.sh
