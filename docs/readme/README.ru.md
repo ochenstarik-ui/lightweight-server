@@ -49,9 +49,50 @@ sudo ./ochenstarik-server-install.sh
 | `ochenstarik-server-panel-warp-6.sh` | Устанавливает 3x-ui и Cloudflare WARP, настраивает и проверяет их порты | Ubuntu 22.04/24.04/26.04 или Debian 12/13 |
 | `ochenstarik-server-backup-7.sh` | Создаёт неизменяемый первичный снимок и настраивает выбранные расписания резервного копирования | Да; зависимости устанавливаются автоматически |
 | `ochenstarik-server-ai-agents-8.sh` | Устанавливает выбранных AI-агентов: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT или Pi Coding Agent | Да; API-ключи настраиваются отдельно |
+| `ochenstarik-server-monitor-manager.sh` | Устанавливает SSH endpoint, главный WireGuard Hub или подключаемый Node для Server Monitor Manager | Да; Hub требуется публичный UDP-адрес |
 | `ochenstarik-server-uninstall.sh` | Удаляет настройки, службы и данные проекта для повторной установки с начала | Да; запускать только из сохранённой SSH-сессии |
 
 Файлы `*.env.example` являются только примерами. Не записывайте настоящие пароли, токены и приватные SSH-ключи в Git.
+
+## Server Monitor Manager: Hub и вторичные серверы
+
+Главному Hub нужен белый IPv4 или домен и открытый UDP-порт (по умолчанию `51820`). Вторичные Node подключаются исходящим WireGuard-соединением и не требуют белого IP.
+
+```bash
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-monitor-manager.sh
+chmod 700 ochenstarik-server-monitor-manager.sh
+bash -n ochenstarik-server-monitor-manager.sh
+sudo ./ochenstarik-server-monitor-manager.sh hub
+```
+
+На Hub создайте отдельный enrollment-код на 10 минут для каждого Node, после чего на соответствующем сервере запустите тот же файл в режиме `node`:
+
+```bash
+sudo ochenstarik-smm node-code ai-agent
+sudo ochenstarik-smm node-code home
+sudo ./ochenstarik-server-monitor-manager.sh node
+```
+
+Links являются направленными:
+
+```bash
+sudo ochenstarik-smm link-connect ai-agent home tcp 22 120
+sudo ochenstarik-smm link-disconnect ai-agent home tcp 22
+sudo ochenstarik-smm nodes
+sudo ochenstarik-smm links
+```
+
+Установщик Node создаст приватный WireGuard-ключ локально и покажет запрос `SMMREQ1`. Во втором терминале выполните на Hub `sudo ochenstarik-smm node-enroll`, вставьте запрос по скрытому приглашению и верните полученный код `SMMACK1` в установщик Node. Enrollment-код действует 10 минут и погашается при первой успешной регистрации.
+
+Команды обслуживания учитывают установленную роль и создают root-only backup перед изменениями:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh update
+sudo ./ochenstarik-server-monitor-manager.sh rollback
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-node
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-hub
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-monitor
+```
 
 ## Требования
 

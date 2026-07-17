@@ -51,7 +51,9 @@ The wizard intentionally requires all module scripts to be present locally. Use 
 | `ochenstarik-server-panel-warp-6.sh` | 3x-ui panel and local Cloudflare WARP proxy | Optional |
 | `ochenstarik-server-backup-7.sh` | Protected initial snapshot and selected daily, weekly, or monthly schedules | Optional |
 | `ochenstarik-server-ai-agents-8.sh` | Installs selected AI agents: Hermes, OpenClaw, OpenHands, OpenCode, Aider, AutoGPT, or Pi Coding Agent | Optional |
+| `ochenstarik-server-monitor-manager.sh` | Installs the Server Monitor Manager SSH endpoint, public WireGuard Hub, or outbound-only Node | Optional; Hub needs a public UDP endpoint |
 | `ochenstarik-server-uninstall.sh` | Removes project-managed settings so installation can start again | Use carefully |
+| `ochenstarik-server-monitor-manager.sh` | Installs monitoring-only, Hub, or Node roles for Server Monitor Manager | Yes |
 
 Every module can be run independently from the full archive or cloned repository:
 
@@ -62,6 +64,84 @@ sudo ./SCRIPT_NAME.sh
 ```
 
 Replace `SCRIPT_NAME.sh` with the required filename from the table.
+
+The Server Monitor Manager installer supports repeatable role-aware commands:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh install-monitor
+sudo ./ochenstarik-server-monitor-manager.sh install-hub
+sudo ./ochenstarik-server-monitor-manager.sh install-node
+sudo ./ochenstarik-server-monitor-manager.sh status
+sudo ./ochenstarik-server-monitor-manager.sh update
+```
+
+Release artifacts include `SHA256SUMS`. Verify the installer before running it:
+
+```bash
+sha256sum --check SHA256SUMS
+```
+
+## Server Monitor Manager Hub and Nodes
+
+The Hub needs a public IPv4 address or domain and an open UDP port (default `51820`). Secondary Nodes establish outbound WireGuard connections and do not need a public IP.
+
+```bash
+curl -fLO https://raw.githubusercontent.com/ochenstarik-ui/lightweight-server/main/ochenstarik-server-monitor-manager.sh
+chmod 700 ochenstarik-server-monitor-manager.sh
+bash -n ochenstarik-server-monitor-manager.sh
+sudo ./ochenstarik-server-monitor-manager.sh hub
+```
+
+Create a separate 10-minute enrollment code for each Node on the Hub, then run the same installer with `node` on the matching server:
+
+```bash
+sudo ochenstarik-smm node-code ai-agent
+sudo ochenstarik-smm node-code home
+sudo ./ochenstarik-server-monitor-manager.sh node
+```
+
+Links are directional. The reverse direction requires its own rule:
+
+```bash
+sudo ochenstarik-smm link-connect ai-agent home tcp 22 120
+sudo ochenstarik-smm link-disconnect ai-agent home tcp 22
+sudo ochenstarik-smm nodes
+sudo ochenstarik-smm links
+```
+
+The Node installer creates its private WireGuard key locally and prints an `SMMREQ1` request. In a second terminal run `sudo ochenstarik-smm node-enroll` on the Hub, paste the request at the hidden prompt, and return the resulting `SMMACK1` code to the Node installer. The enrollment code expires after 10 minutes and is consumed by the first successful registration.
+
+Role-aware maintenance commands create a root-only backup before destructive changes:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh update
+sudo ./ochenstarik-server-monitor-manager.sh rollback
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-node
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-hub
+sudo ./ochenstarik-server-monitor-manager.sh uninstall-monitor
+```
+
+### Experimental persistent control layer
+
+The first persistent Hub/Agent layer is available as an alpha for three-server testing. It uses self-contained single-file binaries, SQLite on the Hub, one-time enrollment codes, and outbound mTLS heartbeats from Nodes. The existing SSH/WireGuard layer remains installed as a fallback while this alpha is tested.
+
+Install the Control service after the WireGuard Hub:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh install-control-hub
+sudo ./ochenstarik-server-monitor-manager.sh control-code home
+sudo ./ochenstarik-server-monitor-manager.sh control-device-code windows-pc
+```
+
+Copy the resulting `SMMCTL1-...` code and install the Agent on the matching Node:
+
+```bash
+sudo ./ochenstarik-server-monitor-manager.sh install-control-agent
+```
+
+Create a new code for every Node. The code contains the public Control CA certificate but never its private key. Release archives are verified against their published SHA-256 checksums before installation. The Hub listens on TCP `7443`; allow this port at the hosting provider firewall if an external firewall is used.
+
+`control-device-code` creates a separate operator identity for the Windows application. Agent certificates cannot list all servers, change Links, or subscribe to the operator event stream. The Control service can invoke only the dedicated `link-connect` and `link-disconnect` policy wrapper through sudo; other Hub administration commands are not granted to it.
 
 ## Installation flow
 
