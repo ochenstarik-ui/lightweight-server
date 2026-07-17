@@ -67,6 +67,17 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 
+for unit in wg-quick@smm0.service ochenstarik-smm-firewall.timer ssh.service; do
+  if ! docker exec "$container" systemctl is-active --quiet "$unit"; then
+    state="$(docker exec "$container" systemctl show "$unit" \
+      --property=ActiveState,SubState,Result --value | tr '\n' ' ')"
+    journal="$(docker exec "$container" journalctl -u "$unit" -n 12 --no-pager 2>&1 \
+      | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')"
+    printf '::error title=Reboot unit failed::%s: %s; %s\n' "$unit" "$state" "$journal"
+    exit 1
+  fi
+done
+
 docker exec "$container" systemctl is-enabled --quiet wg-quick@smm0.service
 docker exec "$container" systemctl is-enabled --quiet ochenstarik-smm-firewall.service
 docker exec "$container" systemctl is-enabled --quiet ochenstarik-smm-firewall.timer
