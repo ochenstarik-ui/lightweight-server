@@ -6,6 +6,7 @@ readonly MONITOR_USER="ochenstarik-monitor"
 readonly MONITOR_HOME="/var/lib/${APP_NAME}"
 readonly MONITOR_COMMAND="/usr/local/libexec/ochenstarik-server-monitor"
 readonly AUTHORIZED_KEYS="${MONITOR_HOME}/.ssh/authorized_keys"
+readonly MONITOR_SSH_CONFIG="/etc/ssh/sshd_config.d/90-ochenstarik-server-monitor.conf"
 readonly MESH_DIR="/etc/${APP_NAME}"
 readonly NODES_DIR="${MESH_DIR}/nodes"
 readonly TOKENS_DIR="${MESH_DIR}/tokens"
@@ -192,6 +193,14 @@ create_monitor_user() {
   printf 'restrict,command="%s" %s\n' "$MONITOR_COMMAND" "$PUBLIC_KEY" > "$AUTHORIZED_KEYS"
   chown "$MONITOR_USER:$MONITOR_USER" "$AUTHORIZED_KEYS"
   chmod 0600 "$AUTHORIZED_KEYS"
+
+  install -d -m 0755 -o root -g root /etc/ssh/sshd_config.d
+  cat > "$MONITOR_SSH_CONFIG" <<'EOF'
+# Required by the restricted Server Monitor Manager identity.
+PubkeyAuthentication yes
+EOF
+  chown root:root "$MONITOR_SSH_CONFIG"
+  chmod 0644 "$MONITOR_SSH_CONFIG"
 }
 
 verify_sshd() {
@@ -1221,7 +1230,7 @@ backup_state() {
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup_file="${backup_dir}/${timestamp}.tar.gz"
   for path in \
-    "$MESH_DIR" "$MONITOR_HOME" "$MONITOR_COMMAND" "$HUB_HELPER" "$HUB_CLI" \
+    "$MESH_DIR" "$MONITOR_HOME" "$MONITOR_COMMAND" "$MONITOR_SSH_CONFIG" "$HUB_HELPER" "$HUB_CLI" \
     "$CONTROL_POLICY_HELPER" "$WG_CONFIG" \
     /etc/systemd/system/ochenstarik-smm-firewall.service \
     /etc/systemd/system/ochenstarik-smm-firewall.timer \
@@ -1285,10 +1294,11 @@ uninstall_monitor() {
     || die "Сначала удалите роль командой uninstall-hub или uninstall-node"
   confirm_action "Удалить пользователя мониторинга и forced-command" || { log "Отменено"; return 0; }
   backup_state
-  rm -f -- "$MONITOR_COMMAND"
+  rm -f -- "$MONITOR_COMMAND" "$MONITOR_SSH_CONFIG"
   if getent passwd "$MONITOR_USER" >/dev/null; then
     userdel --remove "$MONITOR_USER" 2>/dev/null || userdel "$MONITOR_USER"
   fi
+  systemctl reload ssh
   log "Серверная часть мониторинга удалена"
 }
 
